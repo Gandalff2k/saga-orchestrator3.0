@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/testcontainers/testcontainers-go"
 	tckafka "github.com/testcontainers/testcontainers-go/modules/kafka"
@@ -25,6 +26,8 @@ import (
 
 	"github.com/Gandalff2k/saga3/internal/messaging"
 	"github.com/Gandalff2k/saga3/internal/platform/kafka"
+	"github.com/Gandalff2k/saga3/internal/platform/postgres"
+	"github.com/Gandalff2k/saga3/internal/platform/telemetry"
 	"github.com/Gandalff2k/saga3/migrations"
 )
 
@@ -50,6 +53,13 @@ func run(m *testing.M) int {
 		log = slog.New(slog.NewTextHandler(os.Stderr, nil))
 	}
 
+	// Same as production minus exporting: installs the W3C propagator, so trace
+	// context flows into outbox headers exactly like in a real process.
+	if _, err := telemetry.Init(ctx, telemetry.Config{}); err != nil {
+		fmt.Fprintln(os.Stderr, "telemetry:", err)
+		return 1
+	}
+
 	pg, err := tcpostgres.Run(ctx, "postgres:17-alpine",
 		tcpostgres.WithUsername("saga"), tcpostgres.WithPassword("saga"), tcpostgres.WithDatabase("postgres"),
 		tcpostgres.BasicWaitStrategies(),
@@ -58,14 +68,14 @@ func run(m *testing.M) int {
 		fmt.Fprintln(os.Stderr, "start postgres:", err)
 		return 1
 	}
-	defer testcontainers.TerminateContainer(pg)
+	defer terminate("postgres", pg)
 
 	kc, err := tckafka.Run(ctx, "confluentinc/confluent-local:7.5.0", tckafka.WithClusterID("saga-it"))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "start kafka:", err)
 		return 1
 	}
-	defer testcontainers.TerminateContainer(kc)
+	defer terminate("kafka", kc)
 
 	adminDSN, err := pg.ConnectionString(ctx, "sslmode=disable")
 	if err != nil {
@@ -92,6 +102,25 @@ func run(m *testing.M) int {
 	return m.Run()
 }
 
+// Pool opens a pgx pool to a service DB, closed when the test ends.
+func (e *Env) Pool(t *testing.T, service string) *pgxpool.Pool {
+	t.Helper()
+	pool, err := postgres.NewPool(t.Context(), e.DSN[service], 10)
+	if err != nil {
+		t.Fatalf("pool %s: %v", service, err)
+	}
+	t.Cleanup(pool.Close)
+	return pool
+}
+
+// terminate reports (not fails on) cleanup errors: Ryuk reaps leftovers anyway,
+// but a container that won't stop is worth seeing in the output.
+func terminate(name string, c testcontainers.Container) {
+	if err := testcontainers.TerminateContainer(c); err != nil {
+		fmt.Fprintf(os.Stderr, "terminate %s: %v\n", name, err)
+	}
+}
+
 // createAndMigrate creates one database per service (like deploy/compose/postgres-init.sql)
 // and applies migrations with the same code `sagactl migrate` uses.
 func createAndMigrate(ctx context.Context, adminDSN string, log *slog.Logger) (map[string]string, error) {
@@ -99,7 +128,7 @@ func createAndMigrate(ctx context.Context, adminDSN string, log *slog.Logger) (m
 	if err != nil {
 		return nil, err
 	}
-	defer admin.Close()
+	defer func() { _ = admin.Close() }() // statements already ran; a close error changes nothing
 
 	out := map[string]string{}
 	for _, svc := range migrations.Services {

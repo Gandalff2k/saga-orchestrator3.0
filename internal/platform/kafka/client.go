@@ -33,7 +33,7 @@ func NewClient(brokers []string, clientID string, opts ...kgo.Opt) (*kgo.Client,
 	return cl, nil
 }
 
-// ProducerOpts: durable + ordered per key.
+// ProducerOpts returns options for durable producing, ordered per key.
 //   - acks=all and idempotence (kgo default): no loss, no duplicates from producer retries
 //   - with min.insync.replicas=2 on RF=3 topics, a write survives one broker loss
 //   - default partitioner = murmur2 of the key, same as the Java client, so
@@ -47,9 +47,9 @@ func ProducerOpts() []kgo.Opt {
 	}
 }
 
-// ConsumerOpts: manual commits, rebalance blocked while a poll is being
-// processed, cooperative-sticky assignment (scale out/in without
-// stop-the-world rebalances).
+// ConsumerOpts returns consumer-group options: manual commits, rebalance
+// blocked while a poll is being processed, cooperative-sticky assignment
+// (scale out/in without stop-the-world rebalances).
 func ConsumerOpts(cfg config.Consumer) []kgo.Opt {
 	return []kgo.Opt{
 		kgo.ConsumerGroup(cfg.Group),

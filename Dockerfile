@@ -1,7 +1,3 @@
-# syntax=docker/dockerfile:1.7
-# One image, every binary: orchestrator-api, *-worker, outbox-relay, sagactl.
-# Compose/k8s pick the binary via `command`.
-
 FROM golang:1.27-alpine AS build
 WORKDIR /src
 
@@ -16,7 +12,6 @@ RUN --mount=type=cache,target=/go/pkg/mod \
       -ldflags="-s -w -X github.com/Gandalff2k/saga3/internal/platform/app.Version=${VERSION}" \
       -o /out/ ./cmd/...
 
-# distroless/static: no shell, no package manager, runs as uid 65532.
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/ /usr/local/bin/
 USER nonroot:nonroot

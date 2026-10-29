@@ -8,6 +8,7 @@ import (
 	"fmt"
 )
 
+// ErrNotImplemented is returned by every stub; the HTTP layer maps it to 501.
 var ErrNotImplemented = errors.New("not implemented")
 
 // Phase returns ErrNotImplemented annotated with the roadmap phase and feature.

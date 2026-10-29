@@ -16,14 +16,17 @@ const (
 	EvtPaymentFailed         = "payment.failed.v1"
 )
 
+// ReserveSeat is the payload of CmdReserveSeat.
 type ReserveSeat struct {
 	SeatID int `json:"seat_id"`
 }
 
+// ReleaseSeat is the payload of CmdReleaseSeat (compensation for ReserveSeat).
 type ReleaseSeat struct {
 	SeatID int `json:"seat_id"`
 }
 
+// Charge is the payload of CmdCharge. Money is integer cents, never float.
 type Charge struct {
 	AmountCents int64 `json:"amount_cents"`
 }

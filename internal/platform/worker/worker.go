@@ -17,6 +17,7 @@ import (
 	"github.com/Gandalff2k/saga3/internal/platform/postgres"
 )
 
+// Config is everything a worker needs; embed it in the binary's own config.
 type Config struct {
 	config.Postgres
 	config.Kafka

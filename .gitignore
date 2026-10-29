@@ -6,3 +6,6 @@ coverage.*
 .idea/
 .vscode/
 .claude/settings.local.json
+
+# Docs are local-only for now (README, CLAUDE, ADRs, DECISIONS).
+*.md

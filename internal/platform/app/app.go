@@ -20,6 +20,7 @@ import (
 // Version is set at build time: -ldflags "-X github.com/Gandalff2k/saga3/internal/platform/app.Version=..."
 var Version = "dev"
 
+// App is what Main hands to a binary: its common config and the configured logger.
 type App struct {
 	Config config.Common
 	Log    *slog.Logger

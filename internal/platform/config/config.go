@@ -36,11 +36,14 @@ type Common struct {
 	OTLPEndpoint string `env:"OTEL_EXPORTER_OTLP_ENDPOINT"`
 }
 
+// Postgres configures the connection pool. Size MaxConns so that
+// replicas × MaxConns stays below the server's max_connections.
 type Postgres struct {
 	DSN      string `env:"POSTGRES_DSN,required"`
 	MaxConns int32  `env:"POSTGRES_MAX_CONNS" envDefault:"10"`
 }
 
+// Kafka lists seed brokers; the client discovers the rest of the cluster.
 type Kafka struct {
 	Brokers []string `env:"KAFKA_BROKERS,required" envSeparator:","`
 }
@@ -67,6 +70,7 @@ type Relay struct {
 	Retry     retry.Policy  `envPrefix:"RELAY_RETRY_"`
 }
 
+// Topics sizes topics created by `sagactl topics`.
 type Topics struct {
 	Partitions        int32 `env:"TOPIC_PARTITIONS" envDefault:"12"`
 	ReplicationFactor int16 `env:"TOPIC_REPLICATION_FACTOR" envDefault:"3"`

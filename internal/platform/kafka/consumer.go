@@ -41,6 +41,8 @@ type Consumer struct {
 	log    *slog.Logger
 }
 
+// NewConsumer builds a Consumer. client must be built with ConsumerOpts
+// (manual commits, blocked rebalances); the loop relies on both.
 func NewConsumer(client *kgo.Client, proc Processor, dlq DeadLetterer, cfg config.Consumer, log *slog.Logger) *Consumer {
 	return &Consumer{client: client, proc: proc, dlq: dlq, cfg: cfg, log: log}
 }

@@ -23,15 +23,25 @@ type OrderService interface {
 //
 //	POST /orders        {"seat_id":1,"amount_cents":10000}  [Idempotency-Key: <key>]
 //	                    -> 202 Accepted (saga started) | 200 OK (same key replayed)
+//	                    -> 422 (same key, different body) | 400 (validation)
 //	GET  /orders/{id}   -> 200 | 404
 func NewHTTPHandler(svc OrderService, log *slog.Logger) http.Handler {
 	h := &httpHandler{svc: svc, log: log}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /orders", h.placeOrder)
 	mux.HandleFunc("GET /orders/{id}", h.getOrder)
-	return otelhttp.NewHandler(mux, "orchestrator-api",
-		otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string { return r.Method + " " + r.Pattern }),
-	)
+	return otelhttp.NewHandler(mux, "orchestrator-api", otelhttp.WithSpanNameFormatter(spanName))
+}
+
+// spanName names server spans by route ("POST /orders/{id}"), never by raw
+// path: ids in span names explode cardinality and break grouping in Jaeger.
+// The mux sets r.Pattern (method included) on the request it matches, which
+// the formatter sees once the handler has run.
+func spanName(_ string, r *http.Request) string {
+	if r.Pattern != "" {
+		return r.Pattern
+	}
+	return r.Method + " unmatched"
 }
 
 type httpHandler struct {
@@ -91,6 +101,9 @@ func (h *httpHandler) fail(w http.ResponseWriter, r *http.Request, err error) {
 		h.writeError(w, r, http.StatusBadRequest, err.Error())
 	case errors.Is(err, ErrNotFound):
 		h.writeError(w, r, http.StatusNotFound, err.Error())
+	case errors.Is(err, ErrIdempotencyKeyReused):
+		// 422 per the IETF Idempotency-Key draft: same key, different payload.
+		h.writeError(w, r, http.StatusUnprocessableEntity, err.Error())
 	case errors.Is(err, todo.ErrNotImplemented):
 		h.writeError(w, r, http.StatusNotImplemented, err.Error())
 	default:

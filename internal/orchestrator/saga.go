@@ -16,8 +16,10 @@ import (
 	"github.com/Gandalff2k/saga3/internal/messaging"
 )
 
+// State is the saga's position in the state machine (persisted in sagas.state).
 type State string
 
+// Saga states; see the diagram in the package doc.
 const (
 	StateReserving    State = "RESERVING"
 	StateCharging     State = "CHARGING"
@@ -29,14 +31,18 @@ const (
 // Terminal reports whether no further transitions are possible.
 func (s State) Terminal() bool { return s == StateCompleted || s == StateAborted }
 
+// OrderStatus is what the customer sees. It's coarser than State: an order
+// stays PENDING through every intermediate saga step.
 type OrderStatus string
 
+// Order statuses (persisted in orders.status).
 const (
 	OrderPending   OrderStatus = "PENDING"
 	OrderConfirmed OrderStatus = "CONFIRMED"
 	OrderAborted   OrderStatus = "ABORTED"
 )
 
+// Saga is the orchestrator's record of one order's distributed transaction.
 type Saga struct {
 	ID          uuid.UUID
 	OrderID     uuid.UUID

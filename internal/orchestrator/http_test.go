@@ -50,12 +50,13 @@ func TestHTTP_PlaceOrder(t *testing.T) {
 		{"unknown field", `{"seat_id":1,"amount_cents":100,"x":1}`, &fakeService{}, http.StatusBadRequest},
 		{"invalid seat", `{"seat_id":0,"amount_cents":100}`, &fakeService{}, http.StatusBadRequest},
 		{"invalid amount", `{"seat_id":1,"amount_cents":-5}`, &fakeService{}, http.StatusBadRequest},
+		{"key reused with another body", `{"seat_id":1,"amount_cents":100}`, &fakeService{err: ErrIdempotencyKeyReused}, http.StatusUnprocessableEntity},
 		{"internal error hidden", `{"seat_id":1,"amount_cents":100}`, &fakeService{err: errors.New("db password leaked")}, http.StatusInternalServerError},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h := NewHTTPHandler(tt.svc, slog.New(slog.NewTextHandler(io.Discard, nil)))
-			req := httptest.NewRequest(http.MethodPost, "/orders", strings.NewReader(tt.body))
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/orders", strings.NewReader(tt.body))
 			req.Header.Set("Idempotency-Key", "k-1")
 			rec := httptest.NewRecorder()
 
@@ -94,7 +95,7 @@ func TestHTTP_GetOrder(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			h := NewHTTPHandler(tt.svc, slog.New(slog.NewTextHandler(io.Discard, nil)))
 			rec := httptest.NewRecorder()
-			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tt.path, nil))
+			h.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, tt.path, nil))
 			if rec.Code != tt.wantStatus {
 				t.Fatalf("status = %d, want %d", rec.Code, tt.wantStatus)
 			}

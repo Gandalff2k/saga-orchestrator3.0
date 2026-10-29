@@ -31,6 +31,8 @@ type Relay struct {
 	log        *slog.Logger
 }
 
+// NewRelay builds a Relay. instanceID must be unique per replica (pod name):
+// shard leases and membership are keyed by it.
 func NewRelay(pool *pgxpool.Pool, client *kgo.Client, cfg config.Relay, instanceID string, log *slog.Logger) *Relay {
 	return &Relay{pool: pool, client: client, cfg: cfg, instanceID: instanceID, log: log}
 }

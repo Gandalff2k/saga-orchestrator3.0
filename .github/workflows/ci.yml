@@ -6,30 +6,30 @@ on:
 
 jobs:
   unit:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with: { go-version-file: go.mod }
       - run: go vet ./... && go vet -tags=integration ./test/...
       - run: go test -race -count=1 -coverprofile=coverage.out ./...
-      - uses: golangci/golangci-lint-action@v8
-        with: { version: latest }
+      - uses: golangci/golangci-lint-action@v9
+        with: { version: v2.15.0 } # pinned: a new release must not break main by itself
 
   integration:
-    runs-on: ubuntu-latest # has Docker -> testcontainers works
+    runs-on: ubuntu-24.04 # has Docker -> testcontainers works
     needs: unit
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with: { go-version-file: go.mod }
       - run: go test -tags=integration -count=1 -timeout=10m ./test/integration/...
 
   image:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: unit
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: docker build --build-arg VERSION=${{ github.sha }} -t saga3:ci .
       - run: docker compose config -q
       - name: render k8s manifests

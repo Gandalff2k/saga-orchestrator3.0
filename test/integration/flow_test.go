@@ -83,7 +83,3 @@ func TestFlow_RelayCrash_NoLossNoReorder(t *testing.T) {
 func TestFlow_ScaleOut_RebalancesWithoutLoss(t *testing.T) {
 	t.Skip("TODO(phase-4): start 1 inventory worker, load 200 orders, add 2 workers mid-run -> all complete exactly once")
 }
-
-func TestFlow_IdempotencyKey_OneSagaPerKey(t *testing.T) {
-	t.Skip("TODO(phase-1): POST twice with the same Idempotency-Key -> 202 then 200, one saga row")
-}

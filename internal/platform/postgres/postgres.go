@@ -13,6 +13,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// NewPool opens a traced pool and pings it, so a wrong DSN fails at startup
+// instead of on the first request.
 func NewPool(ctx context.Context, dsn string, maxConns int32) (*pgxpool.Pool, error) {
 	cfg, err := pgxpool.ParseConfig(dsn)
 	if err != nil {

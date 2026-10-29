@@ -22,11 +22,14 @@ linters:
     rules:
       - path: _test\.go
         linters: [gosec, unparam]
-      # scaffolding stubs keep their final signatures
-      - text: "is unused"
-        path: internal/platform/(kafka|outbox|inbox)/
-      - linters: [unparam]
-        text: "always receives|result 0 .* is always nil"
+      # Signatures dictated by interfaces (inbox.Handler, kafka.Processor):
+      # an unused ctx is normal there, renaming it to _ is churn.
+      - linters: [revive]
+        text: "^unused-parameter:"
+      # SCAFFOLD: stubs keep their final signatures until implemented.
+      # Delete this rule together with internal/platform/todo.
+      - linters: [unparam, unused]
+        path: internal/(platform/(kafka|outbox|inbox)|inventory|payment)/
 
 formatters:
   enable: [gofmt, goimports]

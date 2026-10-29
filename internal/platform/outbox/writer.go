@@ -10,25 +10,59 @@ package outbox
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 
-	"github.com/Gandalff2k/saga3/internal/messaging"
-	"github.com/Gandalff2k/saga3/internal/platform/todo"
+	"github.com/Gandalff2k/saga3/internal/platform/message"
 )
 
-// Write appends env to the outbox inside tx. key is the Kafka record key —
-// always the saga id, which also determines the outbox shard (see
-// migrations/platform) and therefore per-saga publish order.
+// Write appends env to topic's outbox inside tx.
 //
-// TODO(phase-1):
-//   - inject the current trace context into a map carrier
-//     (otel.GetTextMapPropagator().Inject(ctx, propagation.MapCarrier{}))
-//     and store it in outbox.headers together with message-id / message-type,
-//     so the trace continues API -> outbox -> relay -> Kafka -> consumer
-//   - INSERT INTO outbox (id, topic, key, type, payload, headers) VALUES (...)
-//     (shard is a generated column, don't set it)
-func Write(ctx context.Context, tx pgx.Tx, topic, key string, env messaging.Envelope) error {
-	_, _, _, _ = tx, topic, key, env
-	return todo.Phase(1, "outbox write")
+// It takes a pgx.Tx, not a pool: an outbox row written outside the business
+// transaction would defeat the pattern, so the type system forbids it.
+//
+// The Kafka key is always env.SagaID (not a parameter, so it can't be gotten
+// wrong). The key also determines the outbox shard (generated column, see
+// migrations/platform) and therefore per-saga publish order.
+func Write(ctx context.Context, tx pgx.Tx, topic string, env message.Envelope) error {
+	if topic == "" || env.ID == uuid.Nil || env.SagaID == uuid.Nil || env.Type == "" {
+		return errors.New("outbox: topic, message id, saga id and type are required")
+	}
+
+	payload, err := json.Marshal(env)
+	if err != nil {
+		return fmt.Errorf("outbox: marshal envelope: %w", err)
+	}
+	headers, err := json.Marshal(Headers(ctx, env))
+	if err != nil {
+		return fmt.Errorf("outbox: marshal headers: %w", err)
+	}
+
+	_, err = tx.Exec(ctx,
+		`INSERT INTO outbox (id, topic, key, type, payload, headers)
+		 VALUES ($1, $2, $3, $4, $5, $6)`,
+		env.ID, topic, env.SagaID.String(), env.Type, payload, headers)
+	if err != nil {
+		return fmt.Errorf("outbox: insert %s: %w", env.Type, err)
+	}
+	return nil
+}
+
+// Headers returns the Kafka headers stored with the row: message id/type plus
+// the CURRENT trace context. The relay publishes them as-is, so the consumer's
+// span becomes a child of the span that wrote the outbox row (e.g. the HTTP
+// request), not of the relay's polling loop: one order = one trace.
+func Headers(ctx context.Context, env message.Envelope) map[string]string {
+	carrier := propagation.MapCarrier{
+		message.HeaderID:   env.ID.String(),
+		message.HeaderType: env.Type,
+	}
+	otel.GetTextMapPropagator().Inject(ctx, carrier)
+	return carrier
 }

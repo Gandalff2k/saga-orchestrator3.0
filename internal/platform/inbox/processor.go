@@ -12,7 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/twmb/franz-go/pkg/kgo"
 
-	"github.com/Gandalff2k/saga3/internal/messaging"
+	"github.com/Gandalff2k/saga3/internal/platform/message"
 	"github.com/Gandalff2k/saga3/internal/platform/todo"
 )
 
@@ -20,7 +20,7 @@ import (
 // outgoing messages (outbox.Write) through the same tx. Return
 // retry.Permanent(err) for errors that will never succeed (bad payload,
 // unknown type) so the record goes to the DLQ without retries.
-type Handler func(ctx context.Context, tx pgx.Tx, env messaging.Envelope) error
+type Handler func(ctx context.Context, tx pgx.Tx, env message.Envelope) error
 
 // Processor adapts a Handler to kafka.Processor.
 type Processor struct {
@@ -30,6 +30,8 @@ type Processor struct {
 	log      *slog.Logger
 }
 
+// NewProcessor builds a Processor. consumer must be the consumer group name:
+// it scopes inbox dedup, so changing it makes old messages look new.
 func NewProcessor(pool *pgxpool.Pool, consumer string, h Handler, log *slog.Logger) *Processor {
 	return &Processor{pool: pool, consumer: consumer, handle: h, log: log}
 }
@@ -40,7 +42,7 @@ func NewProcessor(pool *pgxpool.Pool, consumer string, h Handler, log *slog.Logg
 //
 //	WithTx:
 //	  for each rec:
-//	    env, err := messaging.Unmarshal(rec.Value)       -> retry.Permanent on error
+//	    env, err := message.Unmarshal(rec.Value)       -> retry.Permanent on error
 //	    extract trace ctx from rec.Headers, start span "process <type>" (link to the batch span)
 //	    INSERT INTO inbox (consumer, message_id) ... ON CONFLICT DO NOTHING
 //	    0 rows -> duplicate, skip (count saga_inbox_duplicates_total)

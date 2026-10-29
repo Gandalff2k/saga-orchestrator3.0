@@ -35,7 +35,8 @@ func (p Policy) Backoff(attempt int) time.Duration {
 		d = float64(p.Max)
 	}
 	if p.Jitter > 0 {
-		d += d * p.Jitter * (2*rand.Float64() - 1) // uniform in [d-j, d+j]
+		// uniform in [d-j, d+j]; jitter needs spread, not unpredictability -> math/rand is right
+		d += d * p.Jitter * (2*rand.Float64() - 1) //nolint:gosec // G404: not security-sensitive
 	}
 	return time.Duration(d)
 }

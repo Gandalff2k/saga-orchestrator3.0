@@ -22,6 +22,7 @@ import (
 // ScopeName is the instrumentation scope for hand-written spans and metrics.
 const ScopeName = "github.com/Gandalff2k/saga3"
 
+// Config becomes the OTel resource attached to every span and metric.
 type Config struct {
 	ServiceName string
 	Version     string

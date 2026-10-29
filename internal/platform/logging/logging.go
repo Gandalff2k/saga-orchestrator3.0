@@ -12,6 +12,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+// New returns a JSON (or text) logger tagged with service and version.
+// Unknown levels fall back to info rather than failing startup.
 func New(w io.Writer, level, format, service, version string) *slog.Logger {
 	opts := &slog.HandlerOptions{Level: parseLevel(level)}
 

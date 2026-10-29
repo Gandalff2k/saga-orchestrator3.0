@@ -10,21 +10,25 @@ import (
 
 	"github.com/Gandalff2k/saga3/internal/messaging"
 	"github.com/Gandalff2k/saga3/internal/platform/faults"
+	"github.com/Gandalff2k/saga3/internal/platform/message"
 	"github.com/Gandalff2k/saga3/internal/platform/retry"
 	"github.com/Gandalff2k/saga3/internal/platform/todo"
 )
 
+// Service handles inventory commands. It is stateless: all state is in the DB
+// and reached through the inbox tx passed to Handle.
 type Service struct {
 	faults faults.Config
 	log    *slog.Logger
 }
 
+// NewService builds the service; f injects failures for demos (zero value = off).
 func NewService(f faults.Config, log *slog.Logger) *Service {
 	return &Service{faults: f, log: log}
 }
 
 // Handle is the inbox.Handler for inventory.commands.
-func (s *Service) Handle(ctx context.Context, tx pgx.Tx, env messaging.Envelope) error {
+func (s *Service) Handle(ctx context.Context, tx pgx.Tx, env message.Envelope) error {
 	if err := s.faults.Maybe(env.Type); err != nil {
 		return err
 	}
@@ -56,7 +60,7 @@ func (s *Service) Handle(ctx context.Context, tx pgx.Tx, env messaging.Envelope)
 //	  0 rows (taken or unknown seat) -> reply EvtSeatReservationFailed{reason}
 //	unique violation on reservations_one_held_per_seat -> lost a race -> reservation failed
 //	reply = outbox.Write(tx, TopicOrchestratorReplies, saga_id, ...)
-func (s *Service) reserve(ctx context.Context, tx pgx.Tx, env messaging.Envelope, cmd messaging.ReserveSeat) error {
+func (s *Service) reserve(ctx context.Context, tx pgx.Tx, env message.Envelope, cmd messaging.ReserveSeat) error {
 	return todo.Phase(4, "inventory reserve")
 }
 
@@ -65,6 +69,6 @@ func (s *Service) reserve(ctx context.Context, tx pgx.Tx, env messaging.Envelope
 // TODO(phase-4): UPDATE reservations SET status='RELEASED' WHERE saga_id=$1 AND status='HELD'
 // RETURNING seat_id -> UPDATE seats SET status='FREE'; ALWAYS reply EvtSeatReleased
 // (compensations must be idempotent and must not fail on "nothing to undo").
-func (s *Service) release(ctx context.Context, tx pgx.Tx, env messaging.Envelope, cmd messaging.ReleaseSeat) error {
+func (s *Service) release(ctx context.Context, tx pgx.Tx, env message.Envelope, cmd messaging.ReleaseSeat) error {
 	return todo.Phase(4, "inventory release")
 }
