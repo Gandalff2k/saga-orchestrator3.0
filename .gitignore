@@ -1,0 +1,8 @@
+/bin/
+coverage.*
+*.test
+*.out
+.env
+.idea/
+.vscode/
+.claude/settings.local.json

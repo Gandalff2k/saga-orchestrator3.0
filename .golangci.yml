@@ -1,0 +1,35 @@
+version: "2"
+
+run:
+  build-tags: [integration]
+
+linters:
+  enable:
+    - bodyclose
+    - contextcheck
+    - errorlint
+    - gocritic
+    - gosec
+    - misspell
+    - nilerr
+    - noctx
+    - revive
+    - rowserrcheck
+    - sqlclosecheck
+    - unconvert
+    - unparam
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters: [gosec, unparam]
+      # scaffolding stubs keep their final signatures
+      - text: "is unused"
+        path: internal/platform/(kafka|outbox|inbox)/
+      - linters: [unparam]
+        text: "always receives|result 0 .* is always nil"
+
+formatters:
+  enable: [gofmt, goimports]
+  settings:
+    goimports:
+      local-prefixes: [github.com/Gandalff2k/saga3]

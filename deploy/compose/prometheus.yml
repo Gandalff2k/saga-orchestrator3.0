@@ -1,0 +1,9 @@
+# Metrics arrive via remote-write from the otel-collector (push), so there is
+# nothing app-side to scrape. Prometheus only scrapes itself.
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

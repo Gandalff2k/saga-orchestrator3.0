@@ -1,0 +1,262 @@
+# Local stack.
+#
+#   docker compose up -d --build                    infra + migrate + topics
+#   docker compose --profile apps up -d --build     + all services
+#   docker compose --profile apps up -d --scale inventory-worker=4
+#
+# UIs: API :8080 · Kafka UI :8085 · Jaeger :16686 · Grafana :3000 · Prometheus :9090
+name: saga3
+
+x-kafka: &kafka
+  image: apache/kafka:4.1.0
+  restart: unless-stopped
+  healthcheck:
+    test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:29092 >/dev/null 2>&1"]
+    interval: 10s
+    timeout: 10s
+    retries: 12
+    start_period: 20s
+
+# 3 combined broker+controller nodes (KRaft). Topics get RF=3, min.insync=2:
+# `docker compose stop kafka-2` and everything keeps working.
+x-kafka-env: &kafka-env
+  CLUSTER_ID: saga3-local-cluster-01
+  KAFKA_PROCESS_ROLES: broker,controller
+  KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-1:29093,2@kafka-2:29093,3@kafka-3:29093
+  KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+  KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+  KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+  KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+  KAFKA_MIN_INSYNC_REPLICAS: 2
+  KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+  KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+  KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+  KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+  KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+
+x-app: &app
+  image: saga3:dev
+  build:
+    context: .
+    args: { VERSION: dev }
+  restart: unless-stopped
+  depends_on:
+    migrate: { condition: service_completed_successfully }
+    topics: { condition: service_completed_successfully }
+
+x-app-env: &app-env
+  APP_ENV: local
+  LOG_LEVEL: info
+  KAFKA_BROKERS: kafka-1:29092,kafka-2:29092,kafka-3:29092
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+
+x-dsn:
+  orchestrator: &dsn-orchestrator postgres://saga:saga@postgres:5432/orchestrator?sslmode=disable
+  inventory: &dsn-inventory postgres://saga:saga@postgres:5432/inventory?sslmode=disable
+  payment: &dsn-payment postgres://saga:saga@postgres:5432/payment?sslmode=disable
+
+services:
+  # ───────────────────────── Kafka ─────────────────────────
+  kafka-1:
+    <<: *kafka
+    hostname: kafka-1
+    ports: ["9092:9092"]
+    environment:
+      <<: *kafka-env
+      KAFKA_NODE_ID: 1
+      KAFKA_LISTENERS: INTERNAL://:29092,CONTROLLER://:29093,EXTERNAL://:9092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-1:29092,EXTERNAL://localhost:9092
+
+  kafka-2:
+    <<: *kafka
+    hostname: kafka-2
+    ports: ["9094:9094"]
+    environment:
+      <<: *kafka-env
+      KAFKA_NODE_ID: 2
+      KAFKA_LISTENERS: INTERNAL://:29092,CONTROLLER://:29093,EXTERNAL://:9094
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-2:29092,EXTERNAL://localhost:9094
+
+  kafka-3:
+    <<: *kafka
+    hostname: kafka-3
+    ports: ["9095:9095"]
+    environment:
+      <<: *kafka-env
+      KAFKA_NODE_ID: 3
+      KAFKA_LISTENERS: INTERNAL://:29092,CONTROLLER://:29093,EXTERNAL://:9095
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-3:29092,EXTERNAL://localhost:9095
+
+  kafka-ui:
+    image: ghcr.io/kafbat/kafka-ui:v1.2.0
+    ports: ["8085:8080"]
+    environment:
+      KAFKA_CLUSTERS_0_NAME: saga3
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka-1:29092,kafka-2:29092,kafka-3:29092
+    depends_on:
+      kafka-1: { condition: service_healthy }
+
+  # ───────────────────────── Postgres ─────────────────────────
+  # One server, one database per service (each service only knows its own DSN).
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    command: ["postgres", "-c", "max_connections=300"]
+    environment:
+      POSTGRES_USER: saga
+      POSTGRES_PASSWORD: saga
+      POSTGRES_DB: postgres
+    ports: ["5432:5432"]
+    volumes:
+      - ./deploy/compose/postgres-init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U saga -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # ───────────────────────── Observability ─────────────────────────
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.120.0
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./deploy/compose/otel-collector.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "4317:4317" # OTLP gRPC (for services run on the host)
+      - "4318:4318" # OTLP HTTP
+    depends_on: [jaeger]
+
+  jaeger:
+    image: jaegertracing/jaeger:2.5.0
+    restart: unless-stopped
+    ports: ["16686:16686"]
+
+  prometheus:
+    image: prom/prometheus:v3.2.1
+    restart: unless-stopped
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--web.enable-remote-write-receiver"]
+    volumes:
+      - ./deploy/compose/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports: ["9090:9090"]
+
+  grafana:
+    image: grafana/grafana:11.5.2
+    restart: unless-stopped
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    volumes:
+      - ./deploy/compose/grafana/datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml:ro
+    ports: ["3000:3000"]
+    depends_on: [prometheus, jaeger]
+
+  # ───────────────────────── One-shot jobs ─────────────────────────
+  migrate:
+    <<: *app
+    restart: "no"
+    command: ["sagactl", "migrate"]
+    environment:
+      ORCHESTRATOR_DSN: *dsn-orchestrator
+      INVENTORY_DSN: *dsn-inventory
+      PAYMENT_DSN: *dsn-payment
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  topics:
+    <<: *app
+    restart: "no"
+    command: ["sagactl", "topics"]
+    environment:
+      KAFKA_BROKERS: kafka-1:29092,kafka-2:29092,kafka-3:29092
+      TOPIC_PARTITIONS: 12
+      TOPIC_REPLICATION_FACTOR: 3
+    depends_on:
+      kafka-1: { condition: service_healthy }
+      kafka-2: { condition: service_healthy }
+      kafka-3: { condition: service_healthy }
+
+  # ───────────────────────── Services (profile: apps) ─────────────────────────
+  orchestrator-api:
+    <<: *app
+    profiles: [apps]
+    command: ["orchestrator-api"]
+    ports: ["8080:8080"]
+    environment:
+      <<: *app-env
+      SERVICE_NAME: orchestrator-api
+      POSTGRES_DSN: *dsn-orchestrator
+
+  orchestrator-worker:
+    <<: *app
+    profiles: [apps]
+    command: ["orchestrator-worker"]
+    deploy: { replicas: 2 }
+    environment:
+      <<: *app-env
+      SERVICE_NAME: orchestrator-worker
+      POSTGRES_DSN: *dsn-orchestrator
+      CONSUMER_GROUP: orchestrator
+      CONSUMER_TOPICS: orchestrator.replies
+
+  inventory-worker:
+    <<: *app
+    profiles: [apps]
+    command: ["inventory-worker"]
+    deploy: { replicas: 2 }
+    environment:
+      <<: *app-env
+      SERVICE_NAME: inventory-worker
+      POSTGRES_DSN: *dsn-inventory
+      CONSUMER_GROUP: inventory
+      CONSUMER_TOPICS: inventory.commands
+      FAULT_TRANSIENT_RATE: ${INVENTORY_FAULT_TRANSIENT_RATE:-0}
+
+  payment-worker:
+    <<: *app
+    profiles: [apps]
+    command: ["payment-worker"]
+    deploy: { replicas: 2 }
+    environment:
+      <<: *app-env
+      SERVICE_NAME: payment-worker
+      POSTGRES_DSN: *dsn-payment
+      CONSUMER_GROUP: payment
+      CONSUMER_TOPICS: payment.commands
+      PAYMENT_LIMIT_CENTS: 100000
+      FAULT_TRANSIENT_RATE: ${PAYMENT_FAULT_TRANSIENT_RATE:-0}
+
+  outbox-relay-orchestrator:
+    <<: *app
+    profiles: [apps]
+    command: ["outbox-relay"]
+    deploy: { replicas: 2 }
+    environment:
+      <<: *app-env
+      SERVICE_NAME: outbox-relay-orchestrator
+      POSTGRES_DSN: *dsn-orchestrator
+
+  outbox-relay-inventory:
+    <<: *app
+    profiles: [apps]
+    command: ["outbox-relay"]
+    deploy: { replicas: 2 }
+    environment:
+      <<: *app-env
+      SERVICE_NAME: outbox-relay-inventory
+      POSTGRES_DSN: *dsn-inventory
+
+  outbox-relay-payment:
+    <<: *app
+    profiles: [apps]
+    command: ["outbox-relay"]
+    deploy: { replicas: 2 }
+    environment:
+      <<: *app-env
+      SERVICE_NAME: outbox-relay-payment
+      POSTGRES_DSN: *dsn-payment
+
+volumes:
+  pg-data:

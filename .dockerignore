@@ -1,0 +1,13 @@
+.git
+.github
+.idea
+.vscode
+.claude
+deploy
+docs
+test
+**/*_test.go
+*.md
+.env
+bin/
+coverage.*

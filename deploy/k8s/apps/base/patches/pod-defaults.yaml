@@ -1,0 +1,45 @@
+# JSON6902 patch applied to every Deployment in base.
+# Contract for Deployments: the app is containers[0] and declares `ports:`
+# (possibly `[]`), because the ops port is appended to that list.
+- op: add
+  path: /spec/template/spec/terminationGracePeriodSeconds
+  value: 30 # > SHUTDOWN_TIMEOUT: finish batch, commit offsets, release leases, leave group
+- op: add
+  path: /spec/template/spec/securityContext
+  value:
+    runAsNonRoot: true
+    seccompProfile: { type: RuntimeDefault }
+- op: add
+  path: /spec/template/spec/topologySpreadConstraints
+  value:
+    - maxSkew: 1
+      topologyKey: kubernetes.io/hostname
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels: { app.kubernetes.io/part-of: saga3 }
+      matchLabelKeys: [app.kubernetes.io/name]
+- op: add
+  path: /spec/template/spec/containers/0/envFrom
+  value:
+    - configMapRef: { name: saga-config }
+- op: add
+  path: /spec/template/spec/containers/0/ports/-
+  value: { name: ops, containerPort: 8081 }
+- op: add
+  path: /spec/template/spec/containers/0/securityContext
+  value:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities: { drop: [ALL] }
+- op: add
+  path: /spec/template/spec/containers/0/livenessProbe
+  value:
+    httpGet: { path: /healthz, port: ops }
+    periodSeconds: 10
+    failureThreshold: 3
+- op: add
+  path: /spec/template/spec/containers/0/readinessProbe
+  value:
+    httpGet: { path: /readyz, port: ops }
+    periodSeconds: 5
+    failureThreshold: 3

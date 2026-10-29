@@ -1,0 +1,40 @@
+# One-shot setup. Jobs are immutable: to re-run after a change,
+#   kubectl -n saga delete job migrate topics && kubectl apply -k ...
+# Apps start in parallel and crash-loop/stay unready until these complete.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate
+spec:
+  backoffLimit: 10
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: sagactl
+          image: saga3
+          command: [sagactl, migrate]
+          envFrom:
+            - secretRef: { name: saga-db } # ORCHESTRATOR_DSN, INVENTORY_DSN, PAYMENT_DSN
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { memory: 128Mi }
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: topics
+spec:
+  backoffLimit: 10
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: sagactl
+          image: saga3
+          command: [sagactl, topics]
+          envFrom:
+            - configMapRef: { name: saga-config }
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { memory: 128Mi }

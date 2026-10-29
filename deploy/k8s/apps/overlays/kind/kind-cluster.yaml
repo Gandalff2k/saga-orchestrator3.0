@@ -1,0 +1,10 @@
+# kind create cluster --config deploy/k8s/apps/overlays/kind/kind-cluster.yaml
+# 3 workers so topology spread / PDBs / broker spreading are visible.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: saga3
+nodes:
+  - role: control-plane
+  - role: worker
+  - role: worker
+  - role: worker
