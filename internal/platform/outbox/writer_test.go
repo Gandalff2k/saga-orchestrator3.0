@@ -46,7 +46,6 @@ func TestHeaders(t *testing.T) {
 }
 
 func TestWrite_RejectsIncompleteEnvelope(t *testing.T) {
-	// Validation happens before touching tx, so a nil tx is fine here.
 	cases := map[string]struct {
 		topic string
 		env   message.Envelope

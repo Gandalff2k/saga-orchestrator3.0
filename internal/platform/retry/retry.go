@@ -1,10 +1,3 @@
-// Package retry implements exponential backoff with jitter and the
-// transient/permanent error split used by every consumer and the outbox relay.
-//
-// Rule of thumb: an error is TRANSIENT unless someone explicitly wrapped it with
-// Permanent. Transient errors (DB down, broker leader election, lock timeout)
-// are retried; permanent ones (malformed payload, unknown message type) go
-// straight to the DLQ because retrying them can never succeed.
 package retry
 
 import (
@@ -16,16 +9,15 @@ import (
 	"time"
 )
 
-// Policy describes how often and how long to retry.
 type Policy struct {
-	MaxAttempts int           `env:"MAX_ATTEMPTS" envDefault:"5"` // total attempts incl. the first one; <=0 means forever
+	MaxAttempts int           `env:"MAX_ATTEMPTS" envDefault:"5"` 
 	Initial     time.Duration `env:"INITIAL_BACKOFF" envDefault:"200ms"`
 	Max         time.Duration `env:"MAX_BACKOFF" envDefault:"10s"`
 	Multiplier  float64       `env:"BACKOFF_MULTIPLIER" envDefault:"2"`
-	Jitter      float64       `env:"BACKOFF_JITTER" envDefault:"0.2"` // +/- fraction of the computed delay, 0..1
+	Jitter      float64       `env:"BACKOFF_JITTER" envDefault:"0.2"`
 }
 
-// Backoff returns the delay to wait after the given failed attempt (1-based).
+
 func (p Policy) Backoff(attempt int) time.Duration {
 	if attempt < 1 {
 		attempt = 1
@@ -35,14 +27,12 @@ func (p Policy) Backoff(attempt int) time.Duration {
 		d = float64(p.Max)
 	}
 	if p.Jitter > 0 {
-		// uniform in [d-j, d+j]; jitter needs spread, not unpredictability -> math/rand is right
-		d += d * p.Jitter * (2*rand.Float64() - 1) //nolint:gosec // G404: not security-sensitive
+		d += d * p.Jitter * (2*rand.Float64() - 1) 
 	}
 	return time.Duration(d)
 }
 
-// Do calls fn until it succeeds, returns a permanent error, the attempts are
-// exhausted or ctx is done. fn receives the 1-based attempt number.
+
 func Do(ctx context.Context, p Policy, fn func(ctx context.Context, attempt int) error) error {
 	for attempt := 1; ; attempt++ {
 		err := fn(ctx, attempt)
@@ -66,7 +56,6 @@ func Do(ctx context.Context, p Policy, fn func(ctx context.Context, attempt int)
 	}
 }
 
-// ExhaustedError is returned by Do when MaxAttempts transient failures happened.
 type ExhaustedError struct {
 	Attempts int
 	Err      error
@@ -83,7 +72,6 @@ type permanentError struct{ err error }
 func (e permanentError) Error() string { return e.err.Error() }
 func (e permanentError) Unwrap() error { return e.err }
 
-// Permanent marks err as non-retryable. Permanent(nil) is nil.
 func Permanent(err error) error {
 	if err == nil {
 		return nil
@@ -91,7 +79,6 @@ func Permanent(err error) error {
 	return permanentError{err: err}
 }
 
-// IsPermanent reports whether err (or anything it wraps) was marked Permanent.
 func IsPermanent(err error) bool {
 	var p permanentError
 	return errors.As(err, &p)

@@ -13,12 +13,11 @@ import (
 	"github.com/Gandalff2k/saga3/internal/platform/telemetry"
 )
 
-// sagaMetrics. Recorded inside the inbox transaction, so a transaction that is
-// rolled back and retried counts its transition twice: these are operational
-// rates, not accounting (the database is the source of truth for counts).
+
 type sagaMetrics struct {
 	transitions    metric.Int64Counter
 	ignoredReplies metric.Int64Counter
+	timeouts       metric.Int64Counter
 	duration       metric.Float64Histogram
 }
 
@@ -34,6 +33,9 @@ func newSagaMetrics() (*sagaMetrics, error) {
 	errs = append(errs, err)
 	m.ignoredReplies, err = meter.Int64Counter("saga_replies_ignored_total",
 		metric.WithDescription("Replies that didn't apply to the saga's state (late or duplicated)."))
+	errs = append(errs, err)
+	m.timeouts, err = meter.Int64Counter("saga_timeouts_total",
+		metric.WithDescription("Sagas whose step deadline passed, by the state they were stuck in."))
 	errs = append(errs, err)
 	m.duration, err = meter.Float64Histogram("saga_duration_seconds", metric.WithUnit("s"),
 		metric.WithDescription("Time from order placement to a terminal saga state, by outcome."),
@@ -56,4 +58,15 @@ func (m *sagaMetrics) transition(ctx context.Context, from, to State, started ti
 
 func (m *sagaMetrics) ignored(ctx context.Context, replyType string) {
 	m.ignoredReplies.Add(ctx, 1, metric.WithAttributes(attribute.String("type", replyType)))
+}
+
+
+func (m *sagaMetrics) zeroTimeouts(ctx context.Context) {
+	for _, s := range []State{StateReserving, StateCharging, StateRefunding, StateCompensating} {
+		m.timeouts.Add(ctx, 0, metric.WithAttributes(attribute.String("state", string(s))))
+	}
+}
+
+func (m *sagaMetrics) timedOut(ctx context.Context, state State) {
+	m.timeouts.Add(ctx, 1, metric.WithAttributes(attribute.String("state", string(state))))
 }

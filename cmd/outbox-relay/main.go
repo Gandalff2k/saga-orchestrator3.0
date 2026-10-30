@@ -1,5 +1,3 @@
-// outbox-relay: publishes one service DB's outbox to Kafka. Deploy one
-// Deployment per service DB, 2+ replicas each (shards are split between them).
 package main
 
 import (

@@ -1,8 +1,9 @@
-// payment-worker: consumes payment.commands (charge).
 package main
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Gandalff2k/saga3/internal/payment"
 	"github.com/Gandalff2k/saga3/internal/platform/app"
@@ -21,7 +22,8 @@ func main() {
 		if err != nil {
 			return err
 		}
-		svc := payment.NewService(c.Payment, a.Log)
-		return worker.Run(ctx, a, c.Config, svc.Handle)
+		return worker.Run(ctx, a, c.Config, func(*pgxpool.Pool) (worker.Service, error) {
+			return worker.Service{Handle: payment.NewService(c.Payment, a.Log).Handle}, nil
+		})
 	})
 }

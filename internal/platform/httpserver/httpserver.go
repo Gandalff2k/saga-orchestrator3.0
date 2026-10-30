@@ -1,5 +1,3 @@
-// Package httpserver runs HTTP servers with graceful shutdown and provides
-// the ops endpoints (/healthz, /readyz) used by k8s probes.
 package httpserver
 
 import (
@@ -13,10 +11,8 @@ import (
 	"time"
 )
 
-// DefaultReadHeaderTimeout guards against slowloris; set it on every http.Server.
 const DefaultReadHeaderTimeout = 5 * time.Second
 
-// Run serves srv until ctx is cancelled, then shuts it down gracefully.
 func Run(ctx context.Context, srv *http.Server, shutdownTimeout time.Duration, log *slog.Logger) error {
 	errCh := make(chan error, 1)
 	go func() {
@@ -38,18 +34,12 @@ func Run(ctx context.Context, srv *http.Server, shutdownTimeout time.Duration, l
 	return srv.Shutdown(sctx)
 }
 
-// Check is a named readiness dependency (postgres ping, kafka metadata, ...).
 type Check struct {
 	Name string
 	Fn   func(ctx context.Context) error
 }
 
-// OpsHandler serves:
-//
-//	/healthz  liveness: the process is up (never checks dependencies, or a DB
-//	          blip would make k8s restart every pod at once)
-//	/readyz   readiness: all checks pass; failing = pod removed from Service endpoints
-//	/debug/pprof/*  when enablePprof
+
 func OpsHandler(enablePprof bool, checks ...Check) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {

@@ -9,16 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// recordPayment stores the saga's payment outcome once. If the saga already
-// has a payment (a new charge command for the same saga), the STORED outcome
-// is returned instead, so the customer is never charged twice and the reply
-// never changes its mind.
-//
-// Two statements on purpose. A single "INSERT … ON CONFLICT DO NOTHING
-// RETURNING … UNION SELECT …" reads the existing row with the statement's
-// snapshot, which misses a row committed by a concurrent transaction after the
-// statement started (exactly the case where the conflict happened). The
-// second statement gets a fresh snapshot (READ COMMITTED) and sees it.
+
 func recordPayment(ctx context.Context, tx pgx.Tx, sagaID uuid.UUID, amountCents int64, d decision) (decision, error) {
 	err := tx.QueryRow(ctx,
 		`INSERT INTO payments (saga_id, amount_cents, status, reason)
@@ -40,4 +31,29 @@ func recordPayment(ctx context.Context, tx pgx.Tx, sagaID uuid.UUID, amountCents
 		return decision{}, fmt.Errorf("select payment: %w", err)
 	}
 	return stored, nil
+}
+
+
+func refundPayment(ctx context.Context, tx pgx.Tx, sagaID uuid.UUID) (string, error) {
+	tag, err := tx.Exec(ctx,
+		`UPDATE payments SET status = $2, updated_at = now() WHERE saga_id = $1 AND status = $3`,
+		sagaID, statusRefunded, statusCharged)
+	if err != nil {
+		return "", fmt.Errorf("refund payment: %w", err)
+	}
+	if tag.RowsAffected() == 1 {
+		return "refunded", nil
+	}
+
+	tag, err = tx.Exec(ctx,
+		`INSERT INTO payments (saga_id, amount_cents, status, reason)
+		 VALUES ($1, 0, $2, 'cancelled before charge')
+		 ON CONFLICT (saga_id) DO NOTHING`, sagaID, statusCancelled)
+	if err != nil {
+		return "", fmt.Errorf("payment tombstone: %w", err)
+	}
+	if tag.RowsAffected() == 1 {
+		return "cancelled", nil
+	}
+	return "noop", nil
 }

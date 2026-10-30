@@ -1,9 +1,10 @@
-// orchestrator-worker: consumes orchestrator.replies and advances sagas.
 package main
 
 import (
 	"context"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Gandalff2k/saga3/internal/orchestrator"
 	"github.com/Gandalff2k/saga3/internal/platform/app"
@@ -13,7 +14,11 @@ import (
 
 type cfg struct {
 	worker.Config
+	// SagaStepTimeout: a saga that hasn't moved this long is compensated by
+	// the sweeper. Only this deployment reads it (D-604).
 	SagaStepTimeout time.Duration `env:"SAGA_STEP_TIMEOUT" envDefault:"30s"`
+	SweepInterval   time.Duration `env:"SAGA_SWEEP_INTERVAL" envDefault:"5s"`
+	SweepBatch      int           `env:"SAGA_SWEEP_BATCH" envDefault:"100"`
 }
 
 func main() {
@@ -22,11 +27,13 @@ func main() {
 		if err != nil {
 			return err
 		}
-		// HandleReply runs inside the inbox tx; the pool is only needed by the API side.
-		svc, err := orchestrator.NewService(nil, c.SagaStepTimeout, a.Log)
-		if err != nil {
-			return err
-		}
-		return worker.Run(ctx, a, c.Config, svc.HandleReply)
+		return worker.Run(ctx, a, c.Config, func(pool *pgxpool.Pool) (worker.Service, error) {
+			svc, err := orchestrator.NewService(pool, a.Log)
+			if err != nil {
+				return worker.Service{}, err
+			}
+			sweeper := orchestrator.NewSweeper(pool, svc, c.SagaStepTimeout, c.SweepInterval, c.SweepBatch, a.Log)
+			return worker.Service{Handle: svc.HandleReply, Background: []func(context.Context) error{sweeper.Run}}, nil
+		})
 	})
 }

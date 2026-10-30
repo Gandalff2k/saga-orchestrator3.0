@@ -1,11 +1,8 @@
-// orchestrator-api: public HTTP API. Writes orders + sagas + the first command
-// to the orchestrator DB (outbox). Stateless, scale with HPA on CPU/RPS.
 package main
 
 import (
 	"context"
 	"net/http"
-	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -18,8 +15,7 @@ import (
 
 type cfg struct {
 	config.Postgres
-	HTTPAddr        string        `env:"HTTP_ADDR" envDefault:":8080"`
-	SagaStepTimeout time.Duration `env:"SAGA_STEP_TIMEOUT" envDefault:"30s"`
+	HTTPAddr string `env:"HTTP_ADDR" envDefault:":8080"`
 }
 
 func main() {
@@ -35,7 +31,7 @@ func main() {
 		}
 		defer pool.Close()
 
-		svc, err := orchestrator.NewService(pool, c.SagaStepTimeout, a.Log)
+		svc, err := orchestrator.NewService(pool, a.Log)
 		if err != nil {
 			return err
 		}

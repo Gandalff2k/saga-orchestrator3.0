@@ -14,19 +14,17 @@ import (
 	"github.com/Gandalff2k/saga3/internal/platform/telemetry"
 )
 
-// metrics of the relay. The alert that matters is
-// outbox_oldest_unpublished_age_seconds: it grows whenever messages are stuck,
-// whatever the reason (relay down, Kafka down, poison row, lost leases).
+
 type metrics struct {
 	published metric.Int64Counter
 	failures  metric.Int64Counter
 	batchDur  metric.Float64Histogram
 
-	// Observed asynchronously (gauges).
+
 	ownedShards     atomic.Int64
 	backlog         atomic.Int64
 	oldestAgeMillis atomic.Int64
-	statsValid      atomic.Bool // backlog gauges are reported by one replica only
+	statsValid      atomic.Bool 
 }
 
 func newMetrics() (*metrics, error) {

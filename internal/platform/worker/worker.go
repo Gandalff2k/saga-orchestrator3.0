@@ -1,6 +1,3 @@
-// Package worker wires a consumer process: postgres pool, inbox processor,
-// batch consumer with DLQ, inbox janitor and the ops server.
-// Every *-worker binary is "load config, build service, worker.Run".
 package worker
 
 import (
@@ -8,6 +5,8 @@ import (
 	"fmt"
 
 	"golang.org/x/sync/errgroup"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Gandalff2k/saga3/internal/platform/app"
 	"github.com/Gandalff2k/saga3/internal/platform/config"
@@ -17,7 +16,6 @@ import (
 	"github.com/Gandalff2k/saga3/internal/platform/postgres"
 )
 
-// Config is everything a worker needs; embed it in the binary's own config.
 type Config struct {
 	config.Postgres
 	config.Kafka
@@ -25,22 +23,28 @@ type Config struct {
 	config.Inbox
 }
 
-// Run blocks until ctx is cancelled or a component fails. A consumer stopping
-// with kafka.ErrDependencyDown ends the process with an error on purpose: the
-// orchestrator (k8s) restarts it with backoff, and the uncommitted records are
-// redelivered then.
-func Run(ctx context.Context, a *app.App, cfg Config, handle inbox.Handler) error {
+
+type Service struct {
+	Handle     inbox.Handler
+	Background []func(ctx context.Context) error
+}
+
+
+func Run(ctx context.Context, a *app.App, cfg Config, build func(pool *pgxpool.Pool) (Service, error)) error {
 	pool, err := postgres.NewPool(ctx, cfg.DSN, cfg.MaxConns)
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
 
-	proc, err := inbox.NewProcessor(pool, cfg.Group, handle, a.Log)
+	svc, err := build(pool)
 	if err != nil {
 		return err
 	}
-	// Subscribe to the physical (namespaced) topics; handlers keep using logical names.
+	proc, err := inbox.NewProcessor(pool, cfg.Group, svc.Handle, a.Log)
+	if err != nil {
+		return err
+	}
 	consumerCfg := cfg.Consumer
 	consumerCfg.Topics = kafka.Namespace(cfg.TopicPrefix).Topics(cfg.Topics)
 	consumer, err := kafka.NewConsumer(cfg.Brokers, a.Config.ServiceName, consumerCfg, proc, a.Log)
@@ -63,5 +67,8 @@ func Run(ctx context.Context, a *app.App, cfg Config, handle inbox.Handler) erro
 		return nil
 	})
 	g.Go(func() error { return janitor.Run(ctx) })
+	for _, bg := range svc.Background {
+		g.Go(func() error { return bg(ctx) })
+	}
 	return g.Wait()
 }

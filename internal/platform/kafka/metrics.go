@@ -13,8 +13,7 @@ import (
 	"github.com/Gandalff2k/saga3/internal/platform/telemetry"
 )
 
-// consumerMetrics. Labels are bounded: group, topic, outcome, path.
-// Consumer lag itself comes from kotel / the broker (KEDA scales on it).
+
 type consumerMetrics struct {
 	group          attribute.KeyValue
 	recordsTotal   metric.Int64Counter
@@ -64,13 +63,31 @@ func newConsumerMetrics(group string) (*consumerMetrics, error) {
 	return m, nil
 }
 
+
+func (m *consumerMetrics) zero(ctx context.Context, topics []string) {
+	for _, topic := range topics {
+		m.records(ctx, topic, "processed", 0)
+		m.records(ctx, topic, "dead_lettered", 0)
+		m.recordRetry(ctx, topic, "batch", 0)
+		m.recordRetry(ctx, topic, "record", 0)
+		m.slowPath.Add(ctx, 0, metric.WithAttributes(m.group, attribute.String("topic", topic)))
+	}
+	m.hurries.Add(ctx, 0, metric.WithAttributes(m.group))
+	m.commitFailures.Add(ctx, 0, metric.WithAttributes(m.group))
+	m.rewinds.Add(ctx, 0, metric.WithAttributes(m.group))
+}
+
 func (m *consumerMetrics) records(ctx context.Context, topic, outcome string, n int) {
 	m.recordsTotal.Add(ctx, int64(n), metric.WithAttributes(m.group,
 		attribute.String("topic", topic), attribute.String("outcome", outcome)))
 }
 
 func (m *consumerMetrics) retry(ctx context.Context, topic, path string) {
-	m.retries.Add(ctx, 1, metric.WithAttributes(m.group,
+	m.recordRetry(ctx, topic, path, 1)
+}
+
+func (m *consumerMetrics) recordRetry(ctx context.Context, topic, path string, n int64) {
+	m.retries.Add(ctx, n, metric.WithAttributes(m.group,
 		attribute.String("topic", topic), attribute.String("path", path)))
 }
 

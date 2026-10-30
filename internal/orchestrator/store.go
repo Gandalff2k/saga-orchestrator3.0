@@ -10,14 +10,11 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// row is satisfied by *pgxpool.Pool and pgx.Tx: reads work in and out of a transaction.
 type row interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
-// insertOrder inserts a PENDING order. inserted=false means the idempotency
-// key is already taken (by a committed order, or by a concurrent transaction
-// that we waited for — the unique index serializes them).
+
 func insertOrder(ctx context.Context, tx pgx.Tx, id uuid.UUID, in PlaceOrder) (createdAt time.Time, inserted bool, err error) {
 	err = tx.QueryRow(ctx,
 		`INSERT INTO orders (order_id, idempotency_key, seat_id, amount_cents, status)
@@ -35,13 +32,11 @@ func insertOrder(ctx context.Context, tx pgx.Tx, id uuid.UUID, in PlaceOrder) (c
 	return createdAt, true, nil
 }
 
-// insertSaga inserts a new saga. deadline_at is computed by Postgres (one clock
-// for every replica) and is when the sweeper gives up waiting for a reply.
-func insertSaga(ctx context.Context, tx pgx.Tx, s Saga, stepTimeout time.Duration) error {
+func insertSaga(ctx context.Context, tx pgx.Tx, s Saga) error {
 	_, err := tx.Exec(ctx,
-		`INSERT INTO sagas (saga_id, order_id, state, seat_id, amount_cents, deadline_at)
-		 VALUES ($1, $2, $3, $4, $5, now() + make_interval(secs => $6))`,
-		s.ID, s.OrderID, s.State, s.SeatID, s.AmountCents, stepTimeout.Seconds())
+		`INSERT INTO sagas (saga_id, order_id, state, seat_id, amount_cents)
+		 VALUES ($1, $2, $3, $4, $5)`,
+		s.ID, s.OrderID, s.State, s.SeatID, s.AmountCents)
 	if err != nil {
 		return fmt.Errorf("insert saga: %w", err)
 	}
@@ -74,7 +69,6 @@ func scanOrder(r pgx.Row) (Order, error) {
 	return o, nil
 }
 
-// sagaForUpdate loads and row-locks a saga. ErrNotFound if it doesn't exist.
 func sagaForUpdate(ctx context.Context, tx pgx.Tx, id uuid.UUID) (Saga, time.Time, error) {
 	var (
 		s       Saga
@@ -93,20 +87,52 @@ func sagaForUpdate(ctx context.Context, tx pgx.Tx, id uuid.UUID) (Saga, time.Tim
 	return s, started, nil
 }
 
-// updateSaga moves the saga to state and restarts its step deadline.
-func updateSaga(ctx context.Context, tx pgx.Tx, id uuid.UUID, state State, stepTimeout time.Duration) error {
+
+func overdueForUpdate(ctx context.Context, tx pgx.Tx, timeout time.Duration, limit int) ([]Saga, []time.Time, error) {
+	rows, err := tx.Query(ctx,
+		`SELECT saga_id, order_id, state, seat_id, amount_cents, created_at
+		 FROM sagas
+		 WHERE state NOT IN ('COMPLETED', 'ABORTED')
+		   AND updated_at < now() - make_interval(secs => $1)
+		 ORDER BY updated_at
+		 LIMIT $2
+		 FOR UPDATE SKIP LOCKED`, timeout.Seconds(), limit)
+	if err != nil {
+		return nil, nil, fmt.Errorf("select overdue sagas: %w", err)
+	}
+	defer rows.Close()
+
+	var (
+		sagas   []Saga
+		started []time.Time
+	)
+	for rows.Next() {
+		var (
+			s Saga
+			t time.Time
+		)
+		if err := rows.Scan(&s.ID, &s.OrderID, &s.State, &s.SeatID, &s.AmountCents, &t); err != nil {
+			return nil, nil, fmt.Errorf("scan overdue saga: %w", err)
+		}
+		sagas, started = append(sagas, s), append(started, t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("overdue sagas: %w", err)
+	}
+	return sagas, started, nil
+}
+
+func updateSaga(ctx context.Context, tx pgx.Tx, id uuid.UUID, state State) error {
 	_, err := tx.Exec(ctx,
 		`UPDATE sagas
-		 SET state = $2, version = version + 1, updated_at = now(),
-		     deadline_at = now() + make_interval(secs => $3)
-		 WHERE saga_id = $1`, id, state, stepTimeout.Seconds())
+		 SET state = $2, version = version + 1, updated_at = now()
+		 WHERE saga_id = $1`, id, state)
 	if err != nil {
 		return fmt.Errorf("update saga: %w", err)
 	}
 	return nil
 }
 
-// updateOrder sets the order status and/or failure reason; empty = unchanged.
 func updateOrder(ctx context.Context, tx pgx.Tx, id uuid.UUID, status OrderStatus, reason string) error {
 	_, err := tx.Exec(ctx,
 		`UPDATE orders
@@ -120,8 +146,6 @@ func updateOrder(ctx context.Context, tx pgx.Tx, id uuid.UUID, status OrderStatu
 	return nil
 }
 
-// nullIfEmpty maps "" to NULL: the unique index on idempotency_key ignores
-// NULLs, so requests without a key never collide with each other.
 func nullIfEmpty(s string) *string {
 	if s == "" {
 		return nil

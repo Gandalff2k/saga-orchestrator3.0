@@ -1,10 +1,6 @@
 //go:build integration
 
-// Package integration runs the system against real Postgres and Kafka started
-// by testcontainers. All components run in-process, so a test can kill/restart
-// a relay or a worker and inspect DB state directly.
-//
-//	go test -tags=integration -count=1 ./test/integration/...
+
 package integration
 
 import (

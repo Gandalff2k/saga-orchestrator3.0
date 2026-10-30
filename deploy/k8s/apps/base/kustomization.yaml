@@ -25,9 +25,7 @@ configMapGenerator:
       - TOPIC_PARTITIONS=12
       - TOPIC_REPLICATION_FACTOR=3
 
-# Cross-cutting pod settings for every Deployment (security, probes, shared
-# config, graceful shutdown, spreading across nodes). Each Deployment file only
-# declares what is specific to it.
+
 patches:
   - path: patches/pod-defaults.yaml
     target:

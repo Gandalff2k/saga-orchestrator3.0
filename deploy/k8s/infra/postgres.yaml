@@ -1,5 +1,3 @@
-# Single-instance Postgres for local clusters. In a real cluster use a managed
-# DB or an operator (CloudNativePG) with one cluster per service.
 apiVersion: v1
 kind: ConfigMap
 metadata:

@@ -1,5 +1,3 @@
-// Package kafka wraps franz-go (kgo): client construction with sane
-// production defaults, topic administration, the batch consumer and the DLQ.
 package kafka
 
 import (
@@ -13,11 +11,10 @@ import (
 	"github.com/Gandalff2k/saga3/internal/platform/config"
 )
 
-// NewClient builds a traced, metered kgo client. Combine with ProducerOpts.
-// Consumer clients are built by NewConsumer only (it must own the rebalance hooks).
+
 func NewClient(brokers []string, clientID string, opts ...kgo.Opt) (*kgo.Client, error) {
 	k := kotel.NewKotel(
-		kotel.WithTracer(kotel.NewTracer()), // global provider + W3C propagator via headers
+		kotel.WithTracer(kotel.NewTracer()), 
 		kotel.WithMeter(kotel.NewMeter()),
 	)
 
@@ -33,11 +30,6 @@ func NewClient(brokers []string, clientID string, opts ...kgo.Opt) (*kgo.Client,
 	return cl, nil
 }
 
-// ProducerOpts returns options for durable producing, ordered per key.
-//   - acks=all and idempotence (kgo default): no loss, no duplicates from producer retries
-//   - with min.insync.replicas=2 on RF=3 topics, a write survives one broker loss
-//   - default partitioner = murmur2 of the key, same as the Java client, so
-//     saga_id -> partition mapping is stable across languages
 func ProducerOpts() []kgo.Opt {
 	return []kgo.Opt{
 		kgo.RequiredAcks(kgo.AllISRAcks()),
@@ -47,9 +39,7 @@ func ProducerOpts() []kgo.Opt {
 	}
 }
 
-// consumerOpts returns consumer-group options: manual commits, rebalance
-// blocked while a poll is being processed, cooperative-sticky assignment
-// (scale out/in without stop-the-world rebalances).
+
 func consumerOpts(cfg config.Consumer) []kgo.Opt {
 	opts := []kgo.Opt{
 		kgo.ConsumerGroup(cfg.Group),
@@ -60,7 +50,7 @@ func consumerOpts(cfg config.Consumer) []kgo.Opt {
 		kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()),
 		kgo.FetchMaxWait(500 * time.Millisecond),
 	}
-	if cfg.SessionTimeout > 0 { // zero (configs built in code) keeps kgo's default
+	if cfg.SessionTimeout > 0 { 
 		opts = append(opts,
 			kgo.SessionTimeout(cfg.SessionTimeout),
 			kgo.HeartbeatInterval(cfg.SessionTimeout/5),
@@ -69,7 +59,6 @@ func consumerOpts(cfg config.Consumer) []kgo.Opt {
 	return opts
 }
 
-// Ping checks broker connectivity (used by /readyz).
 func Ping(cl *kgo.Client) func(ctx context.Context) error {
 	return func(ctx context.Context) error { return cl.Ping(ctx) }
 }

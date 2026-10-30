@@ -1,5 +1,3 @@
-# Consumers. Useful replicas per group <= partitions (12): extra pods idle.
-# Autoscale on consumer lag, not CPU -> see deploy/k8s/keda.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

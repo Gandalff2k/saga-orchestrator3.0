@@ -1,0 +1,51 @@
+# Alert rules. Prometheus evaluates them (see /alerts); routing to people is
+# Alertmanager's job, which isn't part of the local stack.
+# Labels: metrics arrive via OTLP remote-write, so service.name -> service_name.
+groups:
+  - name: saga
+    rules:
+      - alert: OutboxStuck
+        # The one alert that covers everything between "committed" and "published":
+        # relay down, Kafka down, a poison row, lost leases.
+        expr: max by (service_name) (outbox_oldest_unpublished_age_seconds) > 60
+        for: 1m
+        labels: { severity: page }
+        annotations:
+          summary: "{{ $labels.service_name }}: oldest unpublished outbox row is {{ $value | humanizeDuration }} old"
+
+      - alert: OutboxRelayDown
+        # No relay replica reported for a database: nothing will be published.
+        # (OutboxStuck can't fire then: the gauge comes FROM a relay.)
+        expr: >
+          absent_over_time(outbox_relay_owned_shards{service_name="outbox-relay-orchestrator"}[2m])
+          or absent_over_time(outbox_relay_owned_shards{service_name="outbox-relay-inventory"}[2m])
+          or absent_over_time(outbox_relay_owned_shards{service_name="outbox-relay-payment"}[2m])
+        for: 30s
+        labels: { severity: page }
+        annotations:
+          summary: "an outbox relay deployment has no live replica"
+
+      - alert: MessagesDeadLettered
+        expr: sum by (consumer_group, topic) (increase(consumer_records_total{outcome="dead_lettered"}[5m])) > 0
+        labels: { severity: ticket }
+        annotations:
+          summary: "{{ $labels.consumer_group }} dead-lettered records from {{ $labels.topic }}: inspect with `sagactl dlq list`"
+
+      - alert: SagasTimingOut
+        expr: sum by (state) (increase(saga_timeouts_total[10m])) > 0
+        labels: { severity: ticket }
+        annotations:
+          summary: "sagas timed out in {{ $labels.state }}: a participant is down or too slow"
+
+      - alert: ConsumerCommitFailures
+        expr: sum by (consumer_group) (increase(consumer_commit_failures_total[10m])) > 5
+        labels: { severity: ticket }
+        annotations:
+          summary: "{{ $labels.consumer_group }}: offset commits failing (records will be redelivered)"
+
+      - alert: SagaLatencyHigh
+        expr: histogram_quantile(0.95, sum by (le) (rate(saga_duration_seconds_bucket[5m]))) > 30
+        for: 5m
+        labels: { severity: ticket }
+        annotations:
+          summary: "p95 saga duration is {{ $value | humanizeDuration }}"

@@ -1,5 +1,4 @@
-// Package faults injects failures on purpose, so retries, backoff and the
-// DLQ can be watched working in a local or k8s run. Off by default.
+
 package faults
 
 import (
@@ -10,22 +9,16 @@ import (
 	"github.com/Gandalff2k/saga3/internal/platform/retry"
 )
 
-// ErrInjected is wrapped by every injected failure, so logs and tests can tell
-// them apart from real ones.
+
 var ErrInjected = errors.New("injected fault")
 
-// Config sets failure rates; the zero value injects nothing.
 type Config struct {
-	// TransientRate: probability (0..1) that an operation fails with a
-	// retryable error. 0.3 => most messages succeed after a retry or two.
 	TransientRate float64 `env:"FAULT_TRANSIENT_RATE" envDefault:"0"`
-	// PermanentRate: probability that an operation fails permanently -> DLQ.
 	PermanentRate float64 `env:"FAULT_PERMANENT_RATE" envDefault:"0"`
 }
 
-// Maybe returns an injected error for op according to the configured rates.
 func (c Config) Maybe(op string) error {
-	switch r := rand.Float64(); { //nolint:gosec // G404: chaos testing, not security-sensitive
+	switch r := rand.Float64(); { 
 	case r < c.PermanentRate:
 		return retry.Permanent(fmt.Errorf("%w: permanent failure in %s", ErrInjected, op))
 	case r < c.PermanentRate+c.TransientRate:

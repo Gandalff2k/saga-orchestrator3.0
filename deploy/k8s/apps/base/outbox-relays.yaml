@@ -1,5 +1,3 @@
-# One relay Deployment per service DB. Replicas split the 16 outbox shards via
-# leases: 2 = HA, more = throughput, >16 = idle pods.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

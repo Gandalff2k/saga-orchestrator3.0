@@ -14,16 +14,17 @@ jobs:
       - run: go vet ./... && go vet -tags=integration ./test/...
       - run: go test -race -count=1 -coverprofile=coverage.out ./...
       - uses: golangci/golangci-lint-action@v9
-        with: { version: v2.15.0 } # pinned: a new release must not break main by itself
+        with: { version: v2.15.0 } 
 
   integration:
-    runs-on: ubuntu-24.04 # has Docker -> testcontainers works
+    runs-on: ubuntu-24.04 
     needs: unit
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with: { go-version-file: go.mod }
-      - run: go test -tags=integration -count=1 -timeout=10m ./test/integration/...
+      - run: go test -tags=integration -count=1 -timeout=20m -coverpkg=./internal/...,./migrations/... -coverprofile=coverage.out ./...
+      - run: go tool cover -func=coverage.out | tail -1
 
   image:
     runs-on: ubuntu-24.04

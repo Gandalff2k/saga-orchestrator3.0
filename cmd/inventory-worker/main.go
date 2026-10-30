@@ -1,8 +1,9 @@
-// inventory-worker: consumes inventory.commands (reserve / release seat).
 package main
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Gandalff2k/saga3/internal/inventory"
 	"github.com/Gandalff2k/saga3/internal/platform/app"
@@ -22,7 +23,8 @@ func main() {
 		if err != nil {
 			return err
 		}
-		svc := inventory.NewService(c.Faults, a.Log)
-		return worker.Run(ctx, a, c.Config, svc.Handle)
+		return worker.Run(ctx, a, c.Config, func(*pgxpool.Pool) (worker.Service, error) {
+			return worker.Service{Handle: inventory.NewService(c.Faults, a.Log).Handle}, nil
+		})
 	})
 }

@@ -1,4 +1,3 @@
-# Node drains / cluster upgrades take down at most one pod per component.
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:

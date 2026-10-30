@@ -9,11 +9,8 @@ import (
 
 	"github.com/google/uuid"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
-
-	"github.com/Gandalff2k/saga3/internal/platform/todo"
 )
 
-// OrderService is what the HTTP layer needs (Service implements it; tests fake it).
 type OrderService interface {
 	PlaceOrder(ctx context.Context, in PlaceOrder) (Order, bool, error)
 	GetOrder(ctx context.Context, id uuid.UUID) (Order, error)
@@ -104,8 +101,6 @@ func (h *httpHandler) fail(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, ErrIdempotencyKeyReused):
 		// 422 per the IETF Idempotency-Key draft: same key, different payload.
 		h.writeError(w, r, http.StatusUnprocessableEntity, err.Error())
-	case errors.Is(err, todo.ErrNotImplemented):
-		h.writeError(w, r, http.StatusNotImplemented, err.Error())
 	default:
 		h.log.ErrorContext(r.Context(), "request failed", "err", err, "path", r.URL.Path)
 		h.writeError(w, r, http.StatusInternalServerError, "internal error")

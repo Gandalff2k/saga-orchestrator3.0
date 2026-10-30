@@ -1,5 +1,4 @@
-# Local stack.
-#
+
 #   docker compose up -d --build                    infra + migrate + topics
 #   docker compose --profile apps up -d --build     + all services
 #   docker compose --profile apps up -d --scale inventory-worker=4
@@ -8,7 +7,7 @@
 name: saga3
 
 x-kafka: &kafka
-  image: apache/kafka:4.1.0
+  image: apache/kafka:4.3.1
   restart: unless-stopped
   healthcheck:
     test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:29092 >/dev/null 2>&1"]
@@ -56,7 +55,6 @@ x-dsn:
   payment: &dsn-payment postgres://saga:saga@postgres:5432/payment?sslmode=disable
 
 services:
-  # ───────────────────────── Kafka ─────────────────────────
   kafka-1:
     <<: *kafka
     hostname: kafka-1
@@ -96,7 +94,6 @@ services:
     depends_on:
       kafka-1: { condition: service_healthy }
 
-  # ───────────────────────── Postgres ─────────────────────────
   # One server, one database per service (each service only knows its own DSN).
   postgres:
     image: postgres:17-alpine
@@ -116,7 +113,6 @@ services:
       timeout: 5s
       retries: 20
 
-  # ───────────────────────── Observability ─────────────────────────
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.120.0
     restart: unless-stopped
@@ -139,6 +135,7 @@ services:
     command: ["--config.file=/etc/prometheus/prometheus.yml", "--web.enable-remote-write-receiver"]
     volumes:
       - ./deploy/compose/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/compose/prometheus-rules.yml:/etc/prometheus/rules.yml:ro
     ports: ["9090:9090"]
 
   grafana:
@@ -150,10 +147,11 @@ services:
       GF_AUTH_DISABLE_LOGIN_FORM: "true"
     volumes:
       - ./deploy/compose/grafana/datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml:ro
+      - ./deploy/compose/grafana/dashboards.yaml:/etc/grafana/provisioning/dashboards/dashboards.yaml:ro
+      - ./deploy/compose/grafana/dashboards:/var/lib/grafana/dashboards:ro
     ports: ["3000:3000"]
     depends_on: [prometheus, jaeger]
 
-  # ───────────────────────── One-shot jobs ─────────────────────────
   migrate:
     <<: *app
     restart: "no"
@@ -178,7 +176,6 @@ services:
       kafka-2: { condition: service_healthy }
       kafka-3: { condition: service_healthy }
 
-  # ───────────────────────── Services (profile: apps) ─────────────────────────
   orchestrator-api:
     <<: *app
     profiles: [apps]
@@ -236,6 +233,7 @@ services:
     environment:
       <<: *app-env
       SERVICE_NAME: outbox-relay-orchestrator
+      RELAY_POLL_INTERVAL: ${RELAY_POLL_INTERVAL:-200ms}
       POSTGRES_DSN: *dsn-orchestrator
 
   outbox-relay-inventory:
@@ -246,6 +244,7 @@ services:
     environment:
       <<: *app-env
       SERVICE_NAME: outbox-relay-inventory
+      RELAY_POLL_INTERVAL: ${RELAY_POLL_INTERVAL:-200ms}
       POSTGRES_DSN: *dsn-inventory
 
   outbox-relay-payment:
@@ -256,6 +255,7 @@ services:
     environment:
       <<: *app-env
       SERVICE_NAME: outbox-relay-payment
+      RELAY_POLL_INTERVAL: ${RELAY_POLL_INTERVAL:-200ms}
       POSTGRES_DSN: *dsn-payment
 
 volumes:

@@ -1,5 +1,4 @@
-// Package app is the shared main(): config, logger, telemetry, signal
-// handling and exit code. Every cmd/* is `app.Main(func(ctx, a) error {...})`.
+
 package app
 
 import (
@@ -17,17 +16,14 @@ import (
 	"github.com/Gandalff2k/saga3/internal/platform/telemetry"
 )
 
-// Version is set at build time: -ldflags "-X github.com/Gandalff2k/saga3/internal/platform/app.Version=..."
 var Version = "dev"
 
-// App is what Main hands to a binary: its common config and the configured logger.
 type App struct {
 	Config config.Common
 	Log    *slog.Logger
 }
 
-// Main runs fn and exits the process. ctx is cancelled on SIGINT/SIGTERM;
-// fn must then stop accepting work, finish in-flight work and return.
+
 func Main(fn func(ctx context.Context, a *App) error) {
 	os.Exit(run(fn))
 }
@@ -74,7 +70,6 @@ func run(fn func(ctx context.Context, a *App) error) int {
 	return 0
 }
 
-// ServeOps runs the ops server (/healthz, /readyz, pprof) until ctx is done.
 func (a *App) ServeOps(ctx context.Context, checks ...httpserver.Check) error {
 	srv := &http.Server{
 		Addr:              a.Config.OpsAddr,

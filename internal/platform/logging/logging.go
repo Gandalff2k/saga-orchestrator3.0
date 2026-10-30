@@ -1,6 +1,4 @@
-// Package logging builds the process-wide slog logger. Every record logged
-// with a context carrying an OpenTelemetry span gets trace_id/span_id, so logs
-// and Jaeger traces can be joined.
+
 package logging
 
 import (
@@ -12,8 +10,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// New returns a JSON (or text) logger tagged with service and version.
-// Unknown levels fall back to info rather than failing startup.
+
 func New(w io.Writer, level, format, service, version string) *slog.Logger {
 	opts := &slog.HandlerOptions{Level: parseLevel(level)}
 
@@ -35,7 +32,6 @@ func parseLevel(s string) slog.Level {
 	return l
 }
 
-// traceHandler adds trace_id and span_id from the record's context.
 type traceHandler struct{ slog.Handler }
 
 func (h traceHandler) Handle(ctx context.Context, r slog.Record) error {

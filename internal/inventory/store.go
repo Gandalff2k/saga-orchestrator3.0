@@ -14,7 +14,6 @@ const (
 	reservationReleased = "RELEASED"
 )
 
-// reservationBySaga returns the saga's reservation, if it has one.
 func reservationBySaga(ctx context.Context, tx pgx.Tx, sagaID uuid.UUID) (seatID int, status string, found bool, err error) {
 	err = tx.QueryRow(ctx,
 		`SELECT seat_id, status FROM reservations WHERE saga_id = $1`, sagaID).Scan(&seatID, &status)
@@ -27,12 +26,7 @@ func reservationBySaga(ctx context.Context, tx pgx.Tx, sagaID uuid.UUID) (seatID
 	return seatID, status, true, nil
 }
 
-// takeSeat flips a FREE seat to RESERVED. false = taken or nonexistent.
-//
-// Two sagas racing for one seat are serialized by the row lock: the loser's
-// UPDATE waits, re-checks status='FREE' on the committed row (READ COMMITTED)
-// and matches nothing. The partial unique index on reservations is the
-// backstop if this logic were ever bypassed.
+
 func takeSeat(ctx context.Context, tx pgx.Tx, seatID int) (bool, error) {
 	tag, err := tx.Exec(ctx,
 		`UPDATE seats SET status = 'RESERVED' WHERE seat_id = $1 AND status = 'FREE'`, seatID)
@@ -60,8 +54,6 @@ func insertReservation(ctx context.Context, tx pgx.Tx, sagaID uuid.UUID, seatID 
 	return nil
 }
 
-// releaseReservation marks the saga's HELD reservation RELEASED and returns
-// its seat. ok=false: nothing was held (never reserved, or already released).
 func releaseReservation(ctx context.Context, tx pgx.Tx, sagaID uuid.UUID) (seatID int, ok bool, err error) {
 	err = tx.QueryRow(ctx,
 		`UPDATE reservations SET status = $2, updated_at = now()
@@ -79,6 +71,18 @@ func releaseReservation(ctx context.Context, tx pgx.Tx, sagaID uuid.UUID) (seatI
 func freeSeat(ctx context.Context, tx pgx.Tx, seatID int) error {
 	if _, err := tx.Exec(ctx, `UPDATE seats SET status = 'FREE' WHERE seat_id = $1`, seatID); err != nil {
 		return fmt.Errorf("free seat: %w", err)
+	}
+	return nil
+}
+
+
+func tombstoneReservation(ctx context.Context, tx pgx.Tx, sagaID uuid.UUID, seatID int) error {
+	_, err := tx.Exec(ctx,
+		`INSERT INTO reservations (saga_id, seat_id, status)
+		 SELECT $1, $2, $3 WHERE EXISTS (SELECT 1 FROM seats WHERE seat_id = $2)
+		 ON CONFLICT (saga_id) DO NOTHING`, sagaID, seatID, reservationReleased)
+	if err != nil {
+		return fmt.Errorf("reservation tombstone: %w", err)
 	}
 	return nil
 }

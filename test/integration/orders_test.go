@@ -22,7 +22,7 @@ import (
 func newOrchestrator(t *testing.T) (*orchestrator.Service, *pgxpool.Pool) {
 	t.Helper()
 	pool := env.Pool(t, "orchestrator")
-	svc, err := orchestrator.NewService(pool, 30*time.Second, env.Log)
+	svc, err := orchestrator.NewService(pool, env.Log)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,8 +100,8 @@ func TestPlaceOrder_WritesOrderSagaAndFirstCommand(t *testing.T) {
 	if got.SagaID != order.SagaID || got.SeatID != 7 || got.AmountCents != 12_345 || got.CreatedAt.IsZero() {
 		t.Fatalf("stored order = %+v, want %+v", got, order)
 	}
-	if n := count(t, pool, `SELECT count(*) FROM sagas WHERE saga_id = $1 AND deadline_at > now()`, order.SagaID); n != 1 {
-		t.Fatalf("saga with future deadline: %d rows", n)
+	if n := count(t, pool, `SELECT count(*) FROM sagas WHERE saga_id = $1 AND state = 'RESERVING'`, order.SagaID); n != 1 {
+		t.Fatalf("saga in RESERVING: %d rows", n)
 	}
 
 	// outbox: exactly the first command, unpublished, keyed by saga id

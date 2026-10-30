@@ -8,7 +8,7 @@ func TestDecide(t *testing.T) {
 		want          decision
 	}{
 		{100, 1000, decision{status: statusCharged}},
-		{1000, 1000, decision{status: statusCharged}}, // the limit itself is allowed
+		{1000, 1000, decision{status: statusCharged}}, 
 		{1001, 1000, decision{status: statusDeclined, reason: reasonLimitExceeded}},
 	}
 	for _, tt := range tests {

@@ -1,13 +1,12 @@
-# JSON6902 patch applied to every Deployment in base.
-# Contract for Deployments: the app is containers[0] and declares `ports:`
-# (possibly `[]`), because the ops port is appended to that list.
 - op: add
   path: /spec/template/spec/terminationGracePeriodSeconds
-  value: 30 # > SHUTDOWN_TIMEOUT: finish batch, commit offsets, release leases, leave group
+  value: 30 
 - op: add
   path: /spec/template/spec/securityContext
   value:
     runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
     seccompProfile: { type: RuntimeDefault }
 - op: add
   path: /spec/template/spec/topologySpreadConstraints

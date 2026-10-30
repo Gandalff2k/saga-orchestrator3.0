@@ -45,7 +45,11 @@ type sysOpts struct {
 	paymentLimit     int64
 	inventoryFaults  faults.Config
 	paymentFaults    faults.Config
-	inventoryWorkers int
+	inventoryWorkers int // 0 with noInventory: start them later with addInventoryWorker
+	noInventory      bool
+	noPayment        bool
+	noSweeper        bool // tests that drive Sweeper.SweepOnce themselves
+	stepTimeout      time.Duration
 	retry            retry.Policy
 }
 
@@ -53,6 +57,7 @@ func defaultOpts() sysOpts {
 	return sysOpts{
 		paymentLimit:     100_000,
 		inventoryWorkers: 1,
+		stepTimeout:      30 * time.Second,
 		retry:            retry.Policy{MaxAttempts: 5, Initial: 20 * time.Millisecond, Max: 200 * time.Millisecond, Multiplier: 2},
 	}
 }
@@ -79,16 +84,22 @@ func startSystem(t *testing.T, opts sysOpts) *system {
 	s.startRelay(s.payDB, "relay-pay")
 
 	// Workers.
-	s.svc, err = orchestrator.NewService(s.orchDB, 30*time.Second, env.Log)
+	s.svc, err = orchestrator.NewService(s.orchDB, env.Log)
 	if err != nil {
 		t.Fatal(err)
 	}
 	s.startWorker("orchestrator", messaging.TopicOrchestratorReplies, s.orchDB, s.svc.HandleReply)
-	for range max(1, opts.inventoryWorkers) {
-		s.addInventoryWorker()
+	if !opts.noSweeper {
+		s.startSweeper()
 	}
-	pay := payment.NewService(payment.Config{LimitCents: opts.paymentLimit, Faults: opts.paymentFaults}, env.Log)
-	s.startWorker("payment", messaging.TopicPaymentCommands, s.payDB, pay.Handle)
+	if !opts.noInventory {
+		for range max(1, opts.inventoryWorkers) {
+			s.addInventoryWorker()
+		}
+	}
+	if !opts.noPayment {
+		s.addPaymentWorker()
+	}
 
 	s.api = httptest.NewServer(orchestrator.NewHTTPHandler(s.svc, env.Log))
 	t.Cleanup(s.api.Close)
@@ -105,6 +116,23 @@ func (s *system) startWorker(service, logicalTopic string, pool *pgxpool.Pool, h
 	cfg := consumerCfg(s.group(service), s.ns.Topic(logicalTopic))
 	cfg.Retry = s.opts.retry
 	return startConsumer(s.t, pool, cfg, h)
+}
+
+// startSweeper runs the saga timeout sweeper like orchestrator-worker does.
+func (s *system) startSweeper() {
+	sw := orchestrator.NewSweeper(s.orchDB, s.svc, s.opts.stepTimeout, 200*time.Millisecond, 100, env.Log)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = sw.Run(ctx)
+	}()
+	s.t.Cleanup(func() { cancel(); <-done })
+}
+
+func (s *system) addPaymentWorker() *runningConsumer {
+	pay := payment.NewService(payment.Config{LimitCents: s.opts.paymentLimit, Faults: s.opts.paymentFaults}, env.Log)
+	return s.startWorker("payment", messaging.TopicPaymentCommands, s.payDB, pay.Handle)
 }
 
 func (s *system) addInventoryWorker() *runningConsumer {

@@ -9,10 +9,10 @@ func TestFairShare(t *testing.T) {
 	tests := []struct{ total, alive, want int }{
 		{16, 1, 16},
 		{16, 2, 8},
-		{16, 3, 6}, // 3*6 = 18 >= 16: rounding up keeps every shard coverable
+		{16, 3, 6}, 
 		{16, 16, 1},
-		{16, 20, 1}, // more replicas than shards: some own nothing
-		{16, 0, 16}, // own heartbeat not visible yet: act as the only replica
+		{16, 20, 1}, 
+		{16, 0, 16}, 
 	}
 	for _, tt := range tests {
 		if got := fairShare(tt.total, tt.alive); got != tt.want {

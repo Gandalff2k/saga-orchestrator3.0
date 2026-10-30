@@ -1,8 +1,4 @@
-# Kafka via the Strimzi operator (install it first, see README "Kubernetes").
-# 3 nodes, each controller+broker (KRaft), RF=3 / min.insync=2: one node can
-# be drained or lost without losing acknowledged writes.
-# Bootstrap: saga-kafka-kafka-bootstrap.saga.svc:9092
-apiVersion: kafka.strimzi.io/v1beta2
+apiVersion: kafka.strimzi.io/v1
 kind: KafkaNodePool
 metadata:
   name: dual-role
@@ -12,27 +8,28 @@ spec:
   replicas: 3
   roles: [controller, broker]
   resources:
-    requests: { cpu: 250m, memory: 1Gi }
-    limits: { memory: 1Gi }
+    requests: { cpu: 200m, memory: 768Mi }
+    limits: { memory: 768Mi }
+  jvmOptions:
+    -Xms: 384m
+    -Xmx: 384m
   storage:
     type: jbod
     volumes:
       - id: 0
         type: persistent-claim
-        size: 5Gi
+        size: 2Gi
         deleteClaim: true
         kraftMetadata: shared
 ---
-apiVersion: kafka.strimzi.io/v1beta2
+apiVersion: kafka.strimzi.io/v1
 kind: Kafka
 metadata:
   name: saga-kafka
-  annotations:
-    strimzi.io/node-pools: enabled
-    strimzi.io/kraft: enabled
 spec:
   kafka:
-    version: 4.1.0
+    version: 4.3.1
+    metadataVersion: 4.3-IV0
     listeners:
       - name: plain
         port: 9092
@@ -45,5 +42,4 @@ spec:
       transaction.state.log.replication.factor: 3
       transaction.state.log.min.isr: 2
       auto.create.topics.enable: false
-  # Topics are created by the `topics` Job (sagactl), same code as compose,
-  # so Strimzi's topic operator is not needed.
+  

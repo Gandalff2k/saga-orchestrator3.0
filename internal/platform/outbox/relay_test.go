@@ -23,12 +23,11 @@ func TestAcknowledgedPrefix(t *testing.T) {
 	}
 	boom := errors.New("boom")
 
-	// results arrive in arbitrary order: matching must be by record, not index
 	results := func(errs map[int]error) kgo.ProduceResults {
 		var out kgo.ProduceResults
 		for i := len(recs) - 1; i >= 0; i-- {
 			if err, skip := errs[i]; skip && err == nil {
-				continue // simulate a missing result
+				continue
 			}
 			out = append(out, kgo.ProduceResult{Record: recs[i], Err: errs[i]})
 		}
@@ -90,7 +89,7 @@ func TestRelayConfigValidate(t *testing.T) {
 		t.Fatalf("valid config rejected: %v", err)
 	}
 	bad := ok
-	bad.PublishTimeout = 5e9 // == TTL/3: a batch could outlive its lease
+	bad.PublishTimeout = 5e9 
 	if err := bad.Validate(); err == nil {
 		t.Fatal("PublishTimeout >= LeaseTTL/3 must be rejected")
 	}

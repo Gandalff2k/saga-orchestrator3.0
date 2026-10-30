@@ -11,6 +11,7 @@ const (
 	CmdReserveSeat = "inventory.reserve_seat.v1"
 	CmdReleaseSeat = "inventory.release_seat.v1"
 	CmdCharge      = "payment.charge.v1"
+	CmdRefund      = "payment.refund.v1" // compensation for CmdCharge (sent on timeout)
 )
 
 // Replies: participant -> orchestrator (all on TopicOrchestratorReplies).
@@ -20,6 +21,7 @@ const (
 	EvtSeatReleased          = "inventory.seat_released.v1"
 	EvtPaymentCharged        = "payment.charged.v1"
 	EvtPaymentFailed         = "payment.failed.v1"
+	EvtPaymentRefunded       = "payment.refunded.v1"
 )
 
 // ReserveSeat is the payload of CmdReserveSeat.
@@ -36,6 +38,10 @@ type ReleaseSeat struct {
 type Charge struct {
 	AmountCents int64 `json:"amount_cents"`
 }
+
+// Refund is the payload of CmdRefund. The payment is identified by the saga
+// id (the envelope's), so there's nothing else to carry.
+type Refund struct{}
 
 // Reply is the payload of every participant reply. Reason is set on failures.
 type Reply struct {

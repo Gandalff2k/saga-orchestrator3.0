@@ -1,13 +1,4 @@
-// Package orchestrator owns orders and drives the order saga.
-//
-// saga.go is the PURE state machine: no I/O, no clock, no ids generated
-// inside transitions. Everything else in the package (store, service, http)
-// is plumbing around it. Keep it that way — it's what the unit tests cover.
-//
-//	RESERVING ──seat_reserved──────► CHARGING ──payment_charged──► COMPLETED (order CONFIRMED)
-//	    │                               │
-//	    └─seat_reservation_failed─►     └─payment_failed──► COMPENSATING ──seat_released──► ABORTED
-//	          ABORTED                       (emit release_seat)                         (order ABORTED)
+
 package orchestrator
 
 import (
@@ -16,33 +7,33 @@ import (
 	"github.com/Gandalff2k/saga3/internal/messaging"
 )
 
-// State is the saga's position in the state machine (persisted in sagas.state).
 type State string
 
-// Saga states; see the diagram in the package doc.
 const (
 	StateReserving    State = "RESERVING"
 	StateCharging     State = "CHARGING"
+	StateRefunding    State = "REFUNDING"
 	StateCompensating State = "COMPENSATING"
 	StateCompleted    State = "COMPLETED"
 	StateAborted      State = "ABORTED"
 )
 
-// Terminal reports whether no further transitions are possible.
 func (s State) Terminal() bool { return s == StateCompleted || s == StateAborted }
 
-// OrderStatus is what the customer sees. It's coarser than State: an order
-// stays PENDING through every intermediate saga step.
+
 type OrderStatus string
 
-// Order statuses (persisted in orders.status).
 const (
 	OrderPending   OrderStatus = "PENDING"
 	OrderConfirmed OrderStatus = "CONFIRMED"
 	OrderAborted   OrderStatus = "ABORTED"
 )
 
-// Saga is the orchestrator's record of one order's distributed transaction.
+const (
+	ReasonInventoryTimeout = "timed out waiting for inventory"
+	ReasonPaymentTimeout   = "timed out waiting for payment"
+)
+
 type Saga struct {
 	ID          uuid.UUID
 	OrderID     uuid.UUID
@@ -51,22 +42,18 @@ type Saga struct {
 	AmountCents int64
 }
 
-// Outgoing is a command the saga wants sent. The service turns it into an
-// Envelope and writes it to the outbox in the same transaction as the state change.
+
 type Outgoing struct {
 	Topic   string
 	Type    string
 	Payload any
 }
 
-// Transition is the result of feeding one reply into the saga.
 type Transition struct {
 	Next  State
-	Order OrderStatus // "" = order status unchanged
-	Emit  []Outgoing
-	// Ignored means the reply doesn't apply to the current state (late,
-	// duplicated with a different id, or for a finished saga). It is not an
-	// error: the service records it in the inbox and moves on.
+	Order OrderStatus 
+	Reason string
+	Emit   []Outgoing
 	Ignored bool
 }
 
@@ -84,14 +71,7 @@ func Start(sagaID, orderID uuid.UUID, seatID int, amountCents int64) (Saga, Outg
 func (s Saga) On(replyType string) Transition {
 	switch {
 	case s.State == StateReserving && replyType == messaging.EvtSeatReserved:
-		return Transition{
-			Next: StateCharging,
-			Emit: []Outgoing{{
-				Topic:   messaging.TopicPaymentCommands,
-				Type:    messaging.CmdCharge,
-				Payload: messaging.Charge{AmountCents: s.AmountCents},
-			}},
-		}
+		return Transition{Next: StateCharging, Emit: []Outgoing{s.charge()}}
 
 	case s.State == StateReserving && replyType == messaging.EvtSeatReservationFailed:
 		return Transition{Next: StateAborted, Order: OrderAborted}
@@ -100,18 +80,45 @@ func (s Saga) On(replyType string) Transition {
 		return Transition{Next: StateCompleted, Order: OrderConfirmed}
 
 	case s.State == StateCharging && replyType == messaging.EvtPaymentFailed:
-		return Transition{
-			Next: StateCompensating,
-			Emit: []Outgoing{{
-				Topic:   messaging.TopicInventoryCommands,
-				Type:    messaging.CmdReleaseSeat,
-				Payload: messaging.ReleaseSeat{SeatID: s.SeatID},
-			}},
-		}
+		return Transition{Next: StateCompensating, Emit: []Outgoing{s.release()}}
+
+	case s.State == StateRefunding && replyType == messaging.EvtPaymentRefunded:
+		return Transition{Next: StateCompensating, Emit: []Outgoing{s.release()}}
 
 	case s.State == StateCompensating && replyType == messaging.EvtSeatReleased:
 		return Transition{Next: StateAborted, Order: OrderAborted}
 	}
 
+	// Includes late replies after a timeout: e.g. payment.charged while
+	// REFUNDING — the refund already in flight undoes it.
 	return Transition{Next: s.State, Ignored: true}
+}
+
+// OnTimeout computes what to do when the saga waited too long for a reply.
+func (s Saga) OnTimeout() Transition {
+	switch s.State {
+	case StateReserving:
+		return Transition{Next: StateCompensating, Reason: ReasonInventoryTimeout, Emit: []Outgoing{s.release()}}
+	case StateCharging:
+		return Transition{Next: StateRefunding, Reason: ReasonPaymentTimeout, Emit: []Outgoing{s.refund()}}
+	case StateRefunding:
+		return Transition{Next: StateRefunding, Emit: []Outgoing{s.refund()}} // re-send; refund is idempotent
+	case StateCompensating:
+		return Transition{Next: StateCompensating, Emit: []Outgoing{s.release()}} // re-send; release is idempotent
+	}
+	return Transition{Next: s.State, Ignored: true}
+}
+
+func (s Saga) charge() Outgoing {
+	return Outgoing{Topic: messaging.TopicPaymentCommands, Type: messaging.CmdCharge,
+		Payload: messaging.Charge{AmountCents: s.AmountCents}}
+}
+
+func (s Saga) refund() Outgoing {
+	return Outgoing{Topic: messaging.TopicPaymentCommands, Type: messaging.CmdRefund, Payload: messaging.Refund{}}
+}
+
+func (s Saga) release() Outgoing {
+	return Outgoing{Topic: messaging.TopicInventoryCommands, Type: messaging.CmdReleaseSeat,
+		Payload: messaging.ReleaseSeat{SeatID: s.SeatID}}
 }

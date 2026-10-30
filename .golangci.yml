@@ -26,10 +26,6 @@ linters:
       # an unused ctx is normal there, renaming it to _ is churn.
       - linters: [revive]
         text: "^unused-parameter:"
-      # SCAFFOLD: stubs keep their final signatures until implemented.
-      # Delete this rule together with internal/platform/todo.
-      - linters: [unparam, unused]
-        path: cmd/sagactl/
 
 formatters:
   enable: [gofmt, goimports]

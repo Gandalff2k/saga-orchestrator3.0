@@ -1,8 +1,3 @@
-// Package migrations embeds the SQL schema and applies it with goose.
-//
-// Every service database gets two independent migration sets:
-//   - platform/   outbox + inbox, identical everywhere (table goose_platform_version)
-//   - <service>/  the service's own tables              (table goose_db_version)
 package migrations
 
 import (

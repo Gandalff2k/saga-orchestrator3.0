@@ -24,8 +24,7 @@ var (
 	errPoison    = retry.Permanent(errors.New("poison"))
 )
 
-// fakeProc: ProcessBatch returns batchErrs[i] on call i (last one repeats);
-// ProcessOne asks one(offset).
+
 type fakeProc struct {
 	mu         sync.Mutex
 	batchErrs  []error
@@ -58,7 +57,6 @@ func (f *fakeProc) ProcessOne(_ context.Context, rec *kgo.Record) error {
 
 func (f *fakeProc) Healthy(context.Context) error { return f.healthy }
 
-// fakeDLQ fails with errs[i] on call i, then succeeds; parked records are kept.
 type fakeDLQ struct {
 	errs     []error
 	calls    int
@@ -208,8 +206,7 @@ func TestHandlePartition(t *testing.T) {
 	}
 }
 
-// Stopping (shutdown or a waiting rebalance) mid slow path: the record in
-// flight completes, the handled prefix is reported, no error.
+
 func TestHandlePartition_StopReturnsHandledPrefix(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	proc := &fakeProc{batchErrs: []error{errPoison}, one: func(o int64) error {
@@ -226,8 +223,7 @@ func TestHandlePartition_StopReturnsHandledPrefix(t *testing.T) {
 	}
 }
 
-// A record that can't be parked because the DLQ is down must not count as
-// handled: it stays uncommitted and is redelivered.
+
 func TestHandlePartition_UnparkableRecordIsNotHandled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	dlq := &fakeDLQ{errs: slices.Repeat([]error{errTransient}, 100)}
@@ -253,7 +249,7 @@ func TestByPartition_MergesFetchesInOrder(t *testing.T) {
 		fetch(kgo.FetchPartition{Partition: 0, Records: []*kgo.Record{rec(0, 1), rec(0, 2)}},
 			kgo.FetchPartition{Partition: 1, Records: []*kgo.Record{rec(1, 7)}}),
 		fetch(kgo.FetchPartition{Partition: 0, Records: []*kgo.Record{rec(0, 3)}},
-			kgo.FetchPartition{Partition: 2}), // empty partitions are dropped
+			kgo.FetchPartition{Partition: 2}),
 	}
 
 	got := byPartition(fetches)

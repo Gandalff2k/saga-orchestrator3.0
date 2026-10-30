@@ -1,0 +1,42 @@
+# PgBouncer in front of Postgres for the API and the workers:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.pgbouncer.yml --profile apps up -d --build
+#
+# Why: connections = replicas x POSTGRES_MAX_CONNS. With autoscaled workers
+# that outgrows max_connections; PgBouncer multiplexes many client
+# connections onto a few server ones (transaction pooling).
+
+x-via-pgbouncer:
+  orchestrator: &pgb-orchestrator postgres://saga:saga@pgbouncer:5432/orchestrator?sslmode=disable
+  inventory: &pgb-inventory postgres://saga:saga@pgbouncer:5432/inventory?sslmode=disable
+  payment: &pgb-payment postgres://saga:saga@pgbouncer:5432/payment?sslmode=disable
+
+services:
+  pgbouncer:
+    image: edoburu/pgbouncer:v1.25.2-p0
+    restart: unless-stopped
+    environment:
+      DB_HOST: postgres
+      DB_USER: saga
+      DB_PASSWORD: saga
+      AUTH_TYPE: scram-sha-256
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: 1000
+      DEFAULT_POOL_SIZE: 20
+      MAX_PREPARED_STATEMENTS: 200
+      ADMIN_USERS: saga 
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  orchestrator-api:
+    environment: { POSTGRES_DSN: *pgb-orchestrator }
+    depends_on: [pgbouncer]
+  orchestrator-worker:
+    environment: { POSTGRES_DSN: *pgb-orchestrator }
+    depends_on: [pgbouncer]
+  inventory-worker:
+    environment: { POSTGRES_DSN: *pgb-inventory }
+    depends_on: [pgbouncer]
+  payment-worker:
+    environment: { POSTGRES_DSN: *pgb-payment }
+    depends_on: [pgbouncer]

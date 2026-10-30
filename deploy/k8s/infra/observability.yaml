@@ -1,5 +1,3 @@
-# OTel collector + Jaeger. For metrics in-cluster, install kube-prometheus-stack
-# and point the collector's prometheusremotewrite exporter at it.
 apiVersion: v1
 kind: ConfigMap
 metadata:

@@ -1,7 +1,3 @@
-# Optional: autoscale workers on Kafka consumer lag (requires KEDA installed).
-#   kubectl apply -n saga -f deploy/k8s/keda/scaledobjects.yaml
-# KEDA creates/owns an HPA per worker. maxReplicaCount = partitions (12):
-# beyond that, extra consumers get no partitions.
 apiVersion: keda.sh/v1alpha1
 kind: ScaledObject
 metadata:
@@ -10,11 +6,14 @@ spec:
   scaleTargetRef: { name: inventory-worker }
   minReplicaCount: 2
   maxReplicaCount: 12
-  cooldownPeriod: 120
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown: { stabilizationWindowSeconds: 120 }
   triggers:
     - type: kafka
       metadata:
-        bootstrapServers: saga-kafka-kafka-bootstrap:9092
+        bootstrapServers: saga-kafka-kafka-bootstrap.saga.svc:9092
         consumerGroup: inventory
         topic: inventory.commands
         lagThreshold: "200" # target lag per replica
@@ -28,11 +27,14 @@ spec:
   scaleTargetRef: { name: payment-worker }
   minReplicaCount: 2
   maxReplicaCount: 12
-  cooldownPeriod: 120
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown: { stabilizationWindowSeconds: 120 }
   triggers:
     - type: kafka
       metadata:
-        bootstrapServers: saga-kafka-kafka-bootstrap:9092
+        bootstrapServers: saga-kafka-kafka-bootstrap.saga.svc:9092
         consumerGroup: payment
         topic: payment.commands
         lagThreshold: "200"
@@ -46,11 +48,14 @@ spec:
   scaleTargetRef: { name: orchestrator-worker }
   minReplicaCount: 2
   maxReplicaCount: 12
-  cooldownPeriod: 120
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown: { stabilizationWindowSeconds: 120 }
   triggers:
     - type: kafka
       metadata:
-        bootstrapServers: saga-kafka-kafka-bootstrap:9092
+        bootstrapServers: saga-kafka-kafka-bootstrap.saga.svc:9092
         consumerGroup: orchestrator
         topic: orchestrator.replies
         lagThreshold: "200"
