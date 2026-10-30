@@ -40,7 +40,10 @@ func Run(ctx context.Context, a *app.App, cfg Config, handle inbox.Handler) erro
 	if err != nil {
 		return err
 	}
-	consumer, err := kafka.NewConsumer(cfg.Brokers, a.Config.ServiceName, cfg.Consumer, proc, a.Log)
+	// Subscribe to the physical (namespaced) topics; handlers keep using logical names.
+	consumerCfg := cfg.Consumer
+	consumerCfg.Topics = kafka.Namespace(cfg.TopicPrefix).Topics(cfg.Topics)
+	consumer, err := kafka.NewConsumer(cfg.Brokers, a.Config.ServiceName, consumerCfg, proc, a.Log)
 	if err != nil {
 		return err
 	}

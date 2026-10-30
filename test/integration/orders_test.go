@@ -22,7 +22,11 @@ import (
 func newOrchestrator(t *testing.T) (*orchestrator.Service, *pgxpool.Pool) {
 	t.Helper()
 	pool := env.Pool(t, "orchestrator")
-	return orchestrator.NewService(pool, 30*time.Second, env.Log), pool
+	svc, err := orchestrator.NewService(pool, 30*time.Second, env.Log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return svc, pool
 }
 
 type outboxRow struct {

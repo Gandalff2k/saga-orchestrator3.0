@@ -117,7 +117,7 @@ func topics(ctx context.Context, log *slog.Logger) error {
 	}
 	defer client.Close()
 
-	specs := messaging.Topics(c.Partitions, c.ReplicationFactor)
+	specs := kafka.Namespace(c.TopicPrefix).Specs(messaging.Topics(c.Partitions, c.ReplicationFactor))
 	return retry.Do(ctx, waitPolicy, func(ctx context.Context, attempt int) error {
 		err := kafka.EnsureTopics(ctx, client, specs, log)
 		if err != nil {

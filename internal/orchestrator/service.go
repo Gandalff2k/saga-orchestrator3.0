@@ -11,10 +11,11 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Gandalff2k/saga3/internal/messaging"
 	"github.com/Gandalff2k/saga3/internal/platform/message"
 	"github.com/Gandalff2k/saga3/internal/platform/outbox"
 	"github.com/Gandalff2k/saga3/internal/platform/postgres"
-	"github.com/Gandalff2k/saga3/internal/platform/todo"
+	"github.com/Gandalff2k/saga3/internal/platform/retry"
 )
 
 // Errors the HTTP layer maps to status codes (404, 400, 422).
@@ -33,7 +34,9 @@ type Order struct {
 	AmountCents int64       `json:"amount_cents"`
 	Status      OrderStatus `json:"status"`
 	SagaState   State       `json:"saga_state"`
-	CreatedAt   time.Time   `json:"created_at"`
+	// FailureReason explains an aborted order ("seat already taken", ...).
+	FailureReason string    `json:"failure_reason,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 // PlaceOrder is the input of Service.PlaceOrder.
@@ -62,13 +65,18 @@ type Service struct {
 	pool        *pgxpool.Pool
 	stepTimeout time.Duration
 	log         *slog.Logger
+	m           *sagaMetrics
 }
 
 // NewService builds the service. pool may be nil in the worker, which only
 // uses HandleReply (it runs inside the inbox tx). stepTimeout sets how long a
 // saga may wait for one reply before the sweeper compensates (phase 5).
-func NewService(pool *pgxpool.Pool, stepTimeout time.Duration, log *slog.Logger) *Service {
-	return &Service{pool: pool, stepTimeout: stepTimeout, log: log}
+func NewService(pool *pgxpool.Pool, stepTimeout time.Duration, log *slog.Logger) (*Service, error) {
+	m, err := newSagaMetrics()
+	if err != nil {
+		return nil, err
+	}
+	return &Service{pool: pool, stepTimeout: stepTimeout, log: log, m: m}, nil
 }
 
 // PlaceOrder creates the order and starts its saga. created=false means the
@@ -152,17 +160,60 @@ func (s *Service) GetOrder(ctx context.Context, id uuid.UUID) (Order, error) {
 	return orderByID(ctx, s.pool, id)
 }
 
-// HandleReply is the inbox.Handler for orchestrator.replies.
-//
-// TODO(phase-4), inside the inbox tx:
-//
-//	SELECT ... FROM sagas WHERE saga_id = env.SagaID FOR UPDATE
-//	  no row -> retry.Permanent (reply for an unknown saga = bug or foreign data -> DLQ)
-//	tr := saga.On(env.Type)
-//	tr.Ignored -> log at debug, saga_replies_ignored_total++, return nil
-//	UPDATE sagas SET state, version+1, deadline_at; UPDATE orders SET status if tr.Order != ""
-//	for each tr.Emit: outbox.Write(...)
-//	metrics: saga_transitions_total{from,to}; on terminal state saga_duration_seconds
+// ErrUnknownSaga means a reply arrived for a saga this orchestrator never started.
+var ErrUnknownSaga = errors.New("reply for unknown saga")
+
+// HandleReply is the inbox.Handler for orchestrator.replies: it feeds the
+// reply into the pure state machine (saga.go) and persists the result (new
+// state, order status, follow-up commands) in the inbox transaction.
 func (s *Service) HandleReply(ctx context.Context, tx pgx.Tx, env message.Envelope) error {
-	return todo.Phase(4, "orchestrator reply handler")
+	// FOR UPDATE: replies of one saga arrive in order on one partition, but
+	// the timeout sweeper (phase 5) may touch the same saga concurrently.
+	saga, startedAt, err := sagaForUpdate(ctx, tx, env.SagaID)
+	if errors.Is(err, ErrNotFound) {
+		// A bug or foreign data; retrying can't help -> DLQ, where it's visible.
+		return retry.Permanent(fmt.Errorf("%w: %s %s", ErrUnknownSaga, env.Type, env.SagaID))
+	}
+	if err != nil {
+		return err
+	}
+
+	var reply messaging.Reply
+	if err := env.DecodePayload(&reply); err != nil {
+		return retry.Permanent(err)
+	}
+
+	tr := saga.On(env.Type)
+	if tr.Ignored {
+		// Late, duplicated under a new id, or for a finished saga: expected in
+		// an at-least-once system, not an error.
+		s.log.DebugContext(ctx, "reply ignored", "saga_id", saga.ID, "state", saga.State, "type", env.Type)
+		s.m.ignored(ctx, env.Type)
+		return nil
+	}
+
+	if err := updateSaga(ctx, tx, saga.ID, tr.Next, s.stepTimeout); err != nil {
+		return err
+	}
+	// The reason arrives with the FAILURE reply (e.g. payment.failed), which
+	// may not end the order yet (compensation runs first): store it now.
+	if tr.Order != "" || reply.Reason != "" {
+		if err := updateOrder(ctx, tx, saga.OrderID, tr.Order, reply.Reason); err != nil {
+			return err
+		}
+	}
+	for _, out := range tr.Emit {
+		cmd, err := message.New(out.Type, saga.ID, out.Payload)
+		if err != nil {
+			return err
+		}
+		if err := outbox.Write(ctx, tx, out.Topic, cmd); err != nil {
+			return err
+		}
+	}
+
+	s.m.transition(ctx, saga.State, tr.Next, startedAt)
+	s.log.InfoContext(ctx, "saga advanced", "saga_id", saga.ID, "from", saga.State, "to", tr.Next,
+		"reply", env.Type, "reason", reply.Reason)
+	return nil
 }

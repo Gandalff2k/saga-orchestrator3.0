@@ -47,6 +47,10 @@ type Postgres struct {
 // Kafka lists seed brokers; the client discovers the rest of the cluster.
 type Kafka struct {
 	Brokers []string `env:"KAFKA_BROKERS,required" envSeparator:","`
+	// TopicPrefix namespaces every topic (e.g. "staging-"), so several
+	// environments or test runs can share one cluster. Outbox rows keep the
+	// logical name; the relay, consumers and `sagactl topics` add the prefix.
+	TopicPrefix string `env:"KAFKA_TOPIC_PREFIX"`
 }
 
 // Consumer configures the batch consumer (internal/platform/kafka).
@@ -57,6 +61,11 @@ type Consumer struct {
 	MaxPollRecords int `env:"CONSUMER_MAX_POLL_RECORDS" envDefault:"500"`
 	// Concurrency is how many partitions of one poll are processed in parallel.
 	Concurrency int `env:"CONSUMER_CONCURRENCY" envDefault:"8"`
+	// SessionTimeout: how long the group waits for a silent member before
+	// giving its partitions to others, i.e. how long a crashed worker's
+	// partitions stall. Kafka's default (45s) is long for a saga; heartbeats
+	// run in the background, independent of processing, so 15s is safe.
+	SessionTimeout time.Duration `env:"CONSUMER_SESSION_TIMEOUT" envDefault:"15s"`
 	// Retry applies to transient failures before a record is dead-lettered.
 	Retry retry.Policy `envPrefix:"CONSUMER_RETRY_"`
 }

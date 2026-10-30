@@ -23,7 +23,10 @@ func main() {
 			return err
 		}
 		// HandleReply runs inside the inbox tx; the pool is only needed by the API side.
-		svc := orchestrator.NewService(nil, c.SagaStepTimeout, a.Log)
+		svc, err := orchestrator.NewService(nil, c.SagaStepTimeout, a.Log)
+		if err != nil {
+			return err
+		}
 		return worker.Run(ctx, a, c.Config, svc.HandleReply)
 	})
 }

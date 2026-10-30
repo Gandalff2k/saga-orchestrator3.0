@@ -40,7 +40,7 @@ func main() {
 		}
 		defer client.Close()
 
-		relay, err := outbox.NewRelay(pool, client, c.Relay, a.Config.InstanceID, a.Log)
+		relay, err := outbox.NewRelay(pool, client, c.Relay, kafka.Namespace(c.TopicPrefix), a.Config.InstanceID, a.Log)
 		if err != nil {
 			return err
 		}

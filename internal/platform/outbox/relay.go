@@ -19,6 +19,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/Gandalff2k/saga3/internal/platform/config"
+	"github.com/Gandalff2k/saga3/internal/platform/kafka"
 )
 
 // Relay publishes outbox rows of ONE service database to Kafka.
@@ -36,6 +37,7 @@ type Relay struct {
 	pool   *pgxpool.Pool
 	client *kgo.Client
 	cfg    config.Relay
+	ns     kafka.Namespace
 	leases leaseStore
 	m      *metrics
 	log    *slog.Logger
@@ -68,7 +70,9 @@ func (l *shardLease) remaining() time.Duration {
 // NewRelay builds a Relay. instanceID should identify the pod (HOSTNAME); a
 // random suffix is added so two processes that share a hostname (local runs,
 // containers without one) can never believe they own the same shard.
-func NewRelay(pool *pgxpool.Pool, client *kgo.Client, cfg config.Relay, instanceID string, log *slog.Logger) (*Relay, error) {
+//
+// ns is applied to the logical topic stored in each row when publishing.
+func NewRelay(pool *pgxpool.Pool, client *kgo.Client, cfg config.Relay, ns kafka.Namespace, instanceID string, log *slog.Logger) (*Relay, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -81,6 +85,7 @@ func NewRelay(pool *pgxpool.Pool, client *kgo.Client, cfg config.Relay, instance
 		pool:   pool,
 		client: client,
 		cfg:    cfg,
+		ns:     ns,
 		leases: leaseStore{pool: pool, instance: id, ttl: cfg.LeaseTTL},
 		m:      m,
 		log:    log.With("relay_instance", id),
@@ -329,7 +334,7 @@ func (r *Relay) publishBatch(ctx context.Context, shard int) (published int, ful
 
 	recs := make([]*kgo.Record, len(rows))
 	for i, rw := range rows {
-		recs[i] = toRecord(bctx, rw)
+		recs[i] = toRecord(bctx, rw, r.ns)
 	}
 	results := r.client.ProduceSync(bctx, recs...)
 
@@ -380,14 +385,14 @@ func (r *Relay) markPublished(ctx context.Context, seqs []int64) error {
 // context becomes the record's context: the kotel hook then starts the
 // "publish" span as a CHILD of the original request and overwrites
 // traceparent with it. Without kotel, the original traceparent goes through.
-func toRecord(ctx context.Context, rw row) *kgo.Record {
+func toRecord(ctx context.Context, rw row, ns kafka.Namespace) *kgo.Record {
 	keys := slices.Sorted(maps.Keys(rw.Headers)) // deterministic header order
 	headers := make([]kgo.RecordHeader, 0, len(keys))
 	for _, k := range keys {
 		headers = append(headers, kgo.RecordHeader{Key: k, Value: []byte(rw.Headers[k])})
 	}
 	return &kgo.Record{
-		Topic:   rw.Topic,
+		Topic:   ns.Topic(rw.Topic),
 		Key:     []byte(rw.Key),
 		Value:   rw.Payload,
 		Headers: headers,

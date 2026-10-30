@@ -12,6 +12,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/Gandalff2k/saga3/internal/platform/config"
+	"github.com/Gandalff2k/saga3/internal/platform/kafka"
 )
 
 func TestAcknowledgedPrefix(t *testing.T) {
@@ -64,9 +65,9 @@ func TestToRecord(t *testing.T) {
 	rec := toRecord(context.Background(), row{
 		Seq: 1, Topic: "inventory.commands", Key: "saga-1", Payload: []byte(`{}`),
 		Headers: map[string]string{"message-type": "x", "message-id": "id-1", "traceparent": traceparent},
-	})
+	}, kafka.Namespace("staging-"))
 
-	if rec.Topic != "inventory.commands" || string(rec.Key) != "saga-1" {
+	if rec.Topic != "staging-inventory.commands" || string(rec.Key) != "saga-1" {
 		t.Fatalf("record = %+v", rec)
 	}
 	var keys []string

@@ -51,7 +51,7 @@ func ProducerOpts() []kgo.Opt {
 // blocked while a poll is being processed, cooperative-sticky assignment
 // (scale out/in without stop-the-world rebalances).
 func consumerOpts(cfg config.Consumer) []kgo.Opt {
-	return []kgo.Opt{
+	opts := []kgo.Opt{
 		kgo.ConsumerGroup(cfg.Group),
 		kgo.ConsumeTopics(cfg.Topics...),
 		kgo.Balancers(kgo.CooperativeStickyBalancer()),
@@ -60,6 +60,13 @@ func consumerOpts(cfg config.Consumer) []kgo.Opt {
 		kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()),
 		kgo.FetchMaxWait(500 * time.Millisecond),
 	}
+	if cfg.SessionTimeout > 0 { // zero (configs built in code) keeps kgo's default
+		opts = append(opts,
+			kgo.SessionTimeout(cfg.SessionTimeout),
+			kgo.HeartbeatInterval(cfg.SessionTimeout/5),
+		)
+	}
+	return opts
 }
 
 // Ping checks broker connectivity (used by /readyz).

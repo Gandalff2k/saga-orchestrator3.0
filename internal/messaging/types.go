@@ -1,5 +1,11 @@
 package messaging
 
+import (
+	"github.com/google/uuid"
+
+	"github.com/Gandalff2k/saga3/internal/platform/message"
+)
+
 // Commands: orchestrator -> participant.
 const (
 	CmdReserveSeat = "inventory.reserve_seat.v1"
@@ -34,4 +40,11 @@ type Charge struct {
 // Reply is the payload of every participant reply. Reason is set on failures.
 type Reply struct {
 	Reason string `json:"reason,omitempty"`
+}
+
+// NewReply builds a participant's reply to the orchestrator. Every reply of
+// one saga uses the saga id as Kafka key (outbox.Write enforces it), so
+// replies stay ordered with the commands that caused them.
+func NewReply(replyType string, sagaID uuid.UUID, reason string) (message.Envelope, error) {
+	return message.New(replyType, sagaID, Reply{Reason: reason})
 }

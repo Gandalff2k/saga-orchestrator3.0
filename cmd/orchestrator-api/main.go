@@ -35,7 +35,10 @@ func main() {
 		}
 		defer pool.Close()
 
-		svc := orchestrator.NewService(pool, c.SagaStepTimeout, a.Log)
+		svc, err := orchestrator.NewService(pool, c.SagaStepTimeout, a.Log)
+		if err != nil {
+			return err
+		}
 		api := &http.Server{
 			Addr:              c.HTTPAddr,
 			Handler:           orchestrator.NewHTTPHandler(svc, a.Log),

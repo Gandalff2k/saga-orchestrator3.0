@@ -11,8 +11,8 @@ import (
 	"github.com/Gandalff2k/saga3/internal/messaging"
 	"github.com/Gandalff2k/saga3/internal/platform/faults"
 	"github.com/Gandalff2k/saga3/internal/platform/message"
+	"github.com/Gandalff2k/saga3/internal/platform/outbox"
 	"github.com/Gandalff2k/saga3/internal/platform/retry"
-	"github.com/Gandalff2k/saga3/internal/platform/todo"
 )
 
 // Config is the payment worker's business configuration.
@@ -52,17 +52,55 @@ func (s *Service) Handle(ctx context.Context, tx pgx.Tx, env message.Envelope) e
 	}
 }
 
-// charge records the payment and replies payment.charged / payment.failed.
+// Payment statuses (payments.status).
+const (
+	statusCharged  = "CHARGED"
+	statusDeclined = "DECLINED"
+)
+
+const reasonLimitExceeded = "amount exceeds the payment limit"
+
+// decision is the outcome of a charge: a status and, when declined, why.
+type decision struct {
+	status string
+	reason string
+}
+
+// decide is the payment rule, pure so it's trivially testable. A real
+// provider call would go here; note it must then be idempotent on the saga id
+// (most PSPs accept an idempotency key), because this handler can run again.
+func decide(amountCents, limitCents int64) decision {
+	if amountCents > limitCents {
+		return decision{status: statusDeclined, reason: reasonLimitExceeded}
+	}
+	return decision{status: statusCharged}
+}
+
+// charge records the payment and replies payment.charged or payment.failed.
 //
-// TODO(phase-4):
-//
-//	INSERT payments (saga_id, amount, status) ON CONFLICT (saga_id) DO NOTHING RETURNING status
-//	  conflict -> re-read status and reply the same outcome again (idempotent)
-//	amount > LimitCents -> status DECLINED, reply EvtPaymentFailed{reason:"limit exceeded"}
-//	else                -> status CHARGED,  reply EvtPaymentCharged
-//
-// Note the difference: a DECLINED payment is a business outcome (reply, saga
-// compensates); a DB outage is an infrastructure error (return err, retry).
+// A DECLINED payment is a business outcome (a reply; the saga compensates).
+// A DB error is infrastructure (returned; retried). A non-positive amount
+// can't come from a valid orchestrator: it's a contract violation and goes to
+// the DLQ instead of being "declined" and hidden.
 func (s *Service) charge(ctx context.Context, tx pgx.Tx, env message.Envelope, cmd messaging.Charge) error {
-	return todo.Phase(4, "payment charge")
+	if cmd.AmountCents <= 0 {
+		return retry.Permanent(fmt.Errorf("payment: invalid amount %d for saga %s", cmd.AmountCents, env.SagaID))
+	}
+
+	d, err := recordPayment(ctx, tx, env.SagaID, cmd.AmountCents, decide(cmd.AmountCents, s.cfg.LimitCents))
+	if err != nil {
+		return err
+	}
+
+	replyType := messaging.EvtPaymentCharged
+	if d.status == statusDeclined {
+		replyType = messaging.EvtPaymentFailed
+	}
+	s.log.InfoContext(ctx, "payment processed", "saga_id", env.SagaID, "status", d.status, "reason", d.reason)
+
+	r, err := messaging.NewReply(replyType, env.SagaID, d.reason)
+	if err != nil {
+		return err
+	}
+	return outbox.Write(ctx, tx, messaging.TopicOrchestratorReplies, r)
 }

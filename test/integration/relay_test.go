@@ -5,7 +5,6 @@ package integration
 import (
 	"context"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -16,7 +15,6 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/Gandalff2k/saga3/internal/platform/config"
-	"github.com/Gandalff2k/saga3/internal/platform/kafka"
 	"github.com/Gandalff2k/saga3/internal/platform/message"
 	"github.com/Gandalff2k/saga3/internal/platform/outbox"
 	"github.com/Gandalff2k/saga3/internal/platform/postgres"
@@ -41,29 +39,7 @@ func relayCfg() config.Relay {
 // for its graceful shutdown (leases released).
 func startRelay(t *testing.T, pool *pgxpool.Pool, cfg config.Relay, name string) (stop func()) {
 	t.Helper()
-	client, err := kafka.NewClient(env.Brokers, name, kafka.ProducerOpts()...)
-	if err != nil {
-		t.Fatal(err)
-	}
-	r, err := outbox.NewRelay(pool, client, cfg, name, env.Log)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		if err := r.Run(ctx); err != nil {
-			t.Errorf("relay %s: %v", name, err)
-		}
-		client.Close()
-	}()
-
-	var once sync.Once
-	stop = func() { once.Do(func() { cancel(); <-done }) }
-	t.Cleanup(stop)
-	return stop
+	return startRelayNS(t, pool, cfg, "", name)
 }
 
 type sent struct {
