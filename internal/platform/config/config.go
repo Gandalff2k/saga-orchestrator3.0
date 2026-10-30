@@ -61,6 +61,15 @@ type Consumer struct {
 	Retry retry.Policy `envPrefix:"CONSUMER_RETRY_"`
 }
 
+// Inbox configures inbox cleanup (internal/platform/inbox).
+type Inbox struct {
+	// Retention must exceed the longest time a message can be redelivered:
+	// topic retention (7d) plus any DLQ replay window. Deleting an id earlier
+	// turns a late redelivery into a second execution.
+	Retention       time.Duration `env:"INBOX_RETENTION" envDefault:"336h"` // 14d
+	JanitorInterval time.Duration `env:"INBOX_JANITOR_INTERVAL" envDefault:"10m"`
+}
+
 // Relay configures the outbox relay (internal/platform/outbox).
 type Relay struct {
 	BatchSize    int           `env:"RELAY_BATCH_SIZE" envDefault:"500"`

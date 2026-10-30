@@ -10,6 +10,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kerr"
 	"github.com/twmb/franz-go/pkg/kgo"
+	"github.com/twmb/franz-go/pkg/kmsg"
 )
 
 // EnsureTopics creates missing topics. Existing topics are left untouched
@@ -31,7 +32,7 @@ func EnsureTopics(ctx context.Context, cl *kgo.Client, specs []TopicSpec, log *s
 			return fmt.Errorf("create topic %s: %w", s.Name, err)
 		}
 	}
-	return waitReady(ctx, adm, specs)
+	return waitReady(ctx, cl, specs)
 }
 
 // topicReadyTimeout bounds waitReady; metadata normally converges in well under a second.
@@ -41,7 +42,7 @@ const topicReadyTimeout = 30 * time.Second
 // every partition. CreateTopics returns once the CONTROLLER has the topic;
 // brokers learn about it asynchronously, so a producer/consumer started right
 // after setup could otherwise hit UNKNOWN_TOPIC_OR_PARTITION.
-func waitReady(ctx context.Context, adm *kadm.Client, specs []TopicSpec) error {
+func waitReady(ctx context.Context, cl *kgo.Client, specs []TopicSpec) error {
 	ctx, cancel := context.WithTimeout(ctx, topicReadyTimeout)
 	defer cancel()
 
@@ -53,7 +54,7 @@ func waitReady(ctx context.Context, adm *kadm.Client, specs []TopicSpec) error {
 	tick := time.NewTicker(200 * time.Millisecond)
 	defer tick.Stop()
 	for {
-		missing, err := notReady(ctx, adm, names)
+		missing, err := notReady(ctx, cl, names)
 		if err == nil && len(missing) == 0 {
 			return nil
 		}
@@ -65,23 +66,40 @@ func waitReady(ctx context.Context, adm *kadm.Client, specs []TopicSpec) error {
 	}
 }
 
-func notReady(ctx context.Context, adm *kadm.Client, names []string) ([]string, error) {
-	details, err := adm.ListTopics(ctx, names...)
-	if err != nil {
-		return names, err
+// notReady asks a broker directly. Not kadm.ListTopics: kadm serves metadata
+// from the client's cache (fresh for MetadataMinAge = 5s), so polling it every
+// 200ms would see the same stale "topic missing" answer for 5 seconds.
+func notReady(ctx context.Context, cl *kgo.Client, names []string) ([]string, error) {
+	req := kmsg.NewPtrMetadataRequest()
+	req.AllowAutoTopicCreation = false // checking must never create a topic
+	for _, n := range names {
+		t := kmsg.NewMetadataRequestTopic()
+		t.Topic = kmsg.StringPtr(n)
+		req.Topics = append(req.Topics, t)
 	}
-	var missing []string
-	for _, name := range names {
-		td, ok := details[name]
-		if !ok || td.Err != nil || len(td.Partitions) == 0 {
-			missing = append(missing, name)
+	resp, err := req.RequestWith(ctx, cl)
+	if err != nil {
+		return names, fmt.Errorf("metadata: %w", err)
+	}
+
+	ready := map[string]bool{}
+	for _, t := range resp.Topics {
+		if t.Topic == nil || t.ErrorCode != 0 || len(t.Partitions) == 0 {
 			continue
 		}
-		for _, p := range td.Partitions {
-			if p.Err != nil || p.Leader < 0 {
-				missing = append(missing, name)
+		ok := true
+		for _, p := range t.Partitions {
+			if p.ErrorCode != 0 || p.Leader < 0 {
+				ok = false
 				break
 			}
+		}
+		ready[*t.Topic] = ok
+	}
+	var missing []string
+	for _, n := range names {
+		if !ready[n] {
+			missing = append(missing, n)
 		}
 	}
 	return missing, nil

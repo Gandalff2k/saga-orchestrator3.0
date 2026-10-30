@@ -13,8 +13,8 @@ import (
 	"github.com/Gandalff2k/saga3/internal/platform/config"
 )
 
-// NewClient builds a traced, metered kgo client. Combine with ProducerOpts
-// and/or ConsumerOpts.
+// NewClient builds a traced, metered kgo client. Combine with ProducerOpts.
+// Consumer clients are built by NewConsumer only (it must own the rebalance hooks).
 func NewClient(brokers []string, clientID string, opts ...kgo.Opt) (*kgo.Client, error) {
 	k := kotel.NewKotel(
 		kotel.WithTracer(kotel.NewTracer()), // global provider + W3C propagator via headers
@@ -47,10 +47,10 @@ func ProducerOpts() []kgo.Opt {
 	}
 }
 
-// ConsumerOpts returns consumer-group options: manual commits, rebalance
+// consumerOpts returns consumer-group options: manual commits, rebalance
 // blocked while a poll is being processed, cooperative-sticky assignment
 // (scale out/in without stop-the-world rebalances).
-func ConsumerOpts(cfg config.Consumer) []kgo.Opt {
+func consumerOpts(cfg config.Consumer) []kgo.Opt {
 	return []kgo.Opt{
 		kgo.ConsumerGroup(cfg.Group),
 		kgo.ConsumeTopics(cfg.Topics...),

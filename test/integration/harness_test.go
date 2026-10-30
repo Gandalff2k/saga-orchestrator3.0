@@ -145,7 +145,7 @@ func (e *Env) FreshDB(t *testing.T, service string) *pgxpool.Pool {
 	return pool
 }
 
-// FreshTopic creates a uniquely named topic for one test.
+// FreshTopic creates a uniquely named topic (and its DLQ) for one test.
 func (e *Env) FreshTopic(t *testing.T, partitions int32) string {
 	t.Helper()
 	name := "it-" + uuid.NewString()
@@ -154,11 +154,30 @@ func (e *Env) FreshTopic(t *testing.T, partitions int32) string {
 		t.Fatal(err)
 	}
 	defer cl.Close()
-	spec := []kafka.TopicSpec{{Name: name, Partitions: partitions, ReplicationFactor: 1}}
-	if err := kafka.EnsureTopics(t.Context(), cl, spec, e.Log); err != nil {
+	specs := []kafka.TopicSpec{
+		{Name: name, Partitions: partitions, ReplicationFactor: 1},
+		{Name: kafka.DLQTopic(name), Partitions: partitions, ReplicationFactor: 1},
+	}
+	if err := kafka.EnsureTopics(t.Context(), cl, specs, e.Log); err != nil {
 		t.Fatal(err)
 	}
 	return name
+}
+
+// Admin runs a statement as the superuser on the maintenance database
+// (e.g. to cut a test database off and simulate an outage).
+func (e *Env) Admin(t *testing.T, stmt string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	admin, err := sql.Open("pgx", e.adminDSN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = admin.Close() }()
+	if _, err := admin.ExecContext(ctx, stmt); err != nil {
+		t.Fatalf("%s: %v", stmt, err)
+	}
 }
 
 // terminate reports (not fails on) cleanup errors: Ryuk reaps leftovers anyway,

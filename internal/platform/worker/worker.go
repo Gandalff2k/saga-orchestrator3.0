@@ -1,5 +1,5 @@
-// Package worker wires a consumer process: postgres pool, kafka client,
-// inbox processor, batch consumer with DLQ, and the ops server.
+// Package worker wires a consumer process: postgres pool, inbox processor,
+// batch consumer with DLQ, inbox janitor and the ops server.
 // Every *-worker binary is "load config, build service, worker.Run".
 package worker
 
@@ -22,9 +22,13 @@ type Config struct {
 	config.Postgres
 	config.Kafka
 	config.Consumer
+	config.Inbox
 }
 
-// Run blocks until ctx is cancelled or a component fails.
+// Run blocks until ctx is cancelled or a component fails. A consumer stopping
+// with kafka.ErrDependencyDown ends the process with an error on purpose: the
+// orchestrator (k8s) restarts it with backoff, and the uncommitted records are
+// redelivered then.
 func Run(ctx context.Context, a *app.App, cfg Config, handle inbox.Handler) error {
 	pool, err := postgres.NewPool(ctx, cfg.DSN, cfg.MaxConns)
 	if err != nil {
@@ -32,23 +36,21 @@ func Run(ctx context.Context, a *app.App, cfg Config, handle inbox.Handler) erro
 	}
 	defer pool.Close()
 
-	// One client both consumes and produces to the DLQ.
-	opts := append(kafka.ProducerOpts(), kafka.ConsumerOpts(cfg.Consumer)...)
-	client, err := kafka.NewClient(cfg.Brokers, a.Config.ServiceName, opts...)
+	proc, err := inbox.NewProcessor(pool, cfg.Group, handle, a.Log)
 	if err != nil {
 		return err
 	}
-	defer client.Close()
-
-	proc := inbox.NewProcessor(pool, cfg.Group, handle, a.Log)
-	dlq := kafka.NewDLQProducer(client, cfg.Group)
-	consumer := kafka.NewConsumer(client, proc, dlq, cfg.Consumer, a.Log)
+	consumer, err := kafka.NewConsumer(cfg.Brokers, a.Config.ServiceName, cfg.Consumer, proc, a.Log)
+	if err != nil {
+		return err
+	}
+	janitor := inbox.NewJanitor(pool, cfg.Inbox, a.Log)
 
 	g, ctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
 		return a.ServeOps(ctx,
 			httpserver.Check{Name: "postgres", Fn: pool.Ping},
-			httpserver.Check{Name: "kafka", Fn: kafka.Ping(client)},
+			httpserver.Check{Name: "kafka", Fn: consumer.Ping},
 		)
 	})
 	g.Go(func() error {
@@ -57,5 +59,6 @@ func Run(ctx context.Context, a *app.App, cfg Config, handle inbox.Handler) erro
 		}
 		return nil
 	})
+	g.Go(func() error { return janitor.Run(ctx) })
 	return g.Wait()
 }
