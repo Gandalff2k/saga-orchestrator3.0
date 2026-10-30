@@ -32,7 +32,7 @@ go test -tags=integration -count=1 ./test/integration/... # 33 scenarios, starts
 docker compose --profile apps down -v # remove the containers and their volumes
 ```
 
-Jaeger on localhost:16686, Grafana (dashboard "saga3") on localhost:3000, Prometheus with alerts on localhost:9090, Kafka UI on localhost:8085. Running on Kubernetes (kind, Strimzi, KEDA), all env variables and the scaling table are in [docs/REFERENCE.md](docs/REFERENCE.md).
+Jaeger on localhost:16686, Grafana (dashboard "saga3") on localhost:3000, Prometheus with alerts on localhost:9090, Kafka UI on localhost:8085. Running on Kubernetes (kind, Strimzi, KEDA).
 
 ## Architecture
 
