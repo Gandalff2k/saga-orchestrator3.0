@@ -1,3 +1,4 @@
+// Package payment is the saga participant that charges the customer.
 package payment
 
 import (
@@ -15,22 +16,24 @@ import (
 	"github.com/Gandalff2k/saga3/internal/platform/retry"
 )
 
+// Config is the payment worker's business configuration.
 type Config struct {
-	
 	LimitCents int64 `env:"PAYMENT_LIMIT_CENTS" envDefault:"100000"`
 	Faults     faults.Config
 }
 
-
+// Service handles payment commands.
 type Service struct {
 	cfg Config
 	log *slog.Logger
 }
 
+// NewService builds the service.
 func NewService(cfg Config, log *slog.Logger) *Service {
 	return &Service{cfg: cfg, log: log}
 }
 
+// Handle is the inbox.Handler for payment.commands.
 func (s *Service) Handle(ctx context.Context, tx pgx.Tx, env message.Envelope) error {
 	if err := s.cfg.Faults.Maybe(env.Type); err != nil {
 		return err
@@ -53,7 +56,7 @@ const (
 	statusCharged   = "CHARGED"
 	statusDeclined  = "DECLINED"
 	statusRefunded  = "REFUNDED"
-	statusCancelled = "CANCELLED" 
+	statusCancelled = "CANCELLED"
 )
 
 const reasonLimitExceeded = "amount exceeds the payment limit"
@@ -63,14 +66,12 @@ type decision struct {
 	reason string
 }
 
-
 func decide(amountCents, limitCents int64) decision {
 	if amountCents > limitCents {
 		return decision{status: statusDeclined, reason: reasonLimitExceeded}
 	}
 	return decision{status: statusCharged}
 }
-
 
 func (s *Service) charge(ctx context.Context, tx pgx.Tx, env message.Envelope, cmd messaging.Charge) error {
 	if cmd.AmountCents <= 0 {
@@ -81,7 +82,6 @@ func (s *Service) charge(ctx context.Context, tx pgx.Tx, env message.Envelope, c
 	if err != nil {
 		return err
 	}
-
 
 	replyType, reason := messaging.EvtPaymentCharged, d.reason
 	if d.status != statusCharged {
@@ -98,7 +98,6 @@ func (s *Service) charge(ctx context.Context, tx pgx.Tx, env message.Envelope, c
 	}
 	return outbox.Write(ctx, tx, messaging.TopicOrchestratorReplies, r)
 }
-
 
 func (s *Service) refund(ctx context.Context, tx pgx.Tx, env message.Envelope) error {
 	outcome, err := refundPayment(ctx, tx, env.SagaID)

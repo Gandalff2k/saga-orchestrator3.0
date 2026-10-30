@@ -1,3 +1,4 @@
+// Command orchestrator-worker consumes orchestrator.replies, advances sagas and runs the timeout sweeper.
 package main
 
 import (

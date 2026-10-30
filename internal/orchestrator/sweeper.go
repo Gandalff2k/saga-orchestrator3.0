@@ -11,7 +11,7 @@ import (
 	"github.com/Gandalff2k/saga3/internal/platform/postgres"
 )
 
-
+// Sweeper compensates sagas that haven't moved for longer than the step timeout.
 type Sweeper struct {
 	pool     *pgxpool.Pool
 	svc      *Service
@@ -21,12 +21,12 @@ type Sweeper struct {
 	log      *slog.Logger
 }
 
-
+// NewSweeper builds a Sweeper.
 func NewSweeper(pool *pgxpool.Pool, svc *Service, stepTimeout, interval time.Duration, batch int, log *slog.Logger) *Sweeper {
 	return &Sweeper{pool: pool, svc: svc, timeout: stepTimeout, interval: interval, batch: max(1, batch), log: log}
 }
 
-
+// Run sweeps every interval until ctx is cancelled.
 func (w *Sweeper) Run(ctx context.Context) error {
 	w.svc.m.zeroTimeouts(ctx)
 	t := time.NewTicker(w.interval)
@@ -37,7 +37,7 @@ func (w *Sweeper) Run(ctx context.Context) error {
 			return nil
 		case <-t.C:
 		}
-		for ctx.Err() == nil { 
+		for ctx.Err() == nil {
 			n, err := w.SweepOnce(ctx)
 			if err != nil {
 				if ctx.Err() == nil {
@@ -52,7 +52,7 @@ func (w *Sweeper) Run(ctx context.Context) error {
 	}
 }
 
-
+// SweepOnce times out up to one batch of overdue sagas in one transaction and returns how many.
 func (w *Sweeper) SweepOnce(ctx context.Context) (int, error) {
 	var n int
 	err := postgres.WithTx(ctx, w.pool, func(tx pgx.Tx) error {

@@ -11,6 +11,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
+// OrderService is what the HTTP layer needs (Service implements it; tests fake it).
 type OrderService interface {
 	PlaceOrder(ctx context.Context, in PlaceOrder) (Order, bool, error)
 	GetOrder(ctx context.Context, id uuid.UUID) (Order, error)

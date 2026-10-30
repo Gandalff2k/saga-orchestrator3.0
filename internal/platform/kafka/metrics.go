@@ -13,7 +13,6 @@ import (
 	"github.com/Gandalff2k/saga3/internal/platform/telemetry"
 )
 
-
 type consumerMetrics struct {
 	group          attribute.KeyValue
 	recordsTotal   metric.Int64Counter
@@ -62,7 +61,6 @@ func newConsumerMetrics(group string) (*consumerMetrics, error) {
 	}
 	return m, nil
 }
-
 
 func (m *consumerMetrics) zero(ctx context.Context, topics []string) {
 	for _, topic := range topics {

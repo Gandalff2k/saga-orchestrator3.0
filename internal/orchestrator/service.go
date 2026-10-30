@@ -18,30 +18,33 @@ import (
 	"github.com/Gandalff2k/saga3/internal/platform/retry"
 )
 
+// Sentinel errors that the HTTP layer maps to status codes.
 var (
-	ErrNotFound     = errors.New("order not found")
-	ErrInvalidInput = errors.New("invalid input")
+	ErrNotFound             = errors.New("order not found")
+	ErrInvalidInput         = errors.New("invalid input")
 	ErrIdempotencyKeyReused = errors.New("idempotency key reused with a different request")
 )
 
+// Order is the read model returned by the API: the order plus its saga state.
 type Order struct {
-	ID          uuid.UUID   `json:"order_id"`
-	SagaID      uuid.UUID   `json:"saga_id"`
-	SeatID      int         `json:"seat_id"`
-	AmountCents int64       `json:"amount_cents"`
-	Status      OrderStatus `json:"status"`
-	SagaState   State       `json:"saga_state"`
-	FailureReason string    `json:"failure_reason,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
+	ID            uuid.UUID   `json:"order_id"`
+	SagaID        uuid.UUID   `json:"saga_id"`
+	SeatID        int         `json:"seat_id"`
+	AmountCents   int64       `json:"amount_cents"`
+	Status        OrderStatus `json:"status"`
+	SagaState     State       `json:"saga_state"`
+	FailureReason string      `json:"failure_reason,omitempty"`
+	CreatedAt     time.Time   `json:"created_at"`
 }
 
+// PlaceOrder is the input of Service.PlaceOrder.
 type PlaceOrder struct {
 	SeatID         int
 	AmountCents    int64
-	IdempotencyKey string 
+	IdempotencyKey string
 }
 
-
+// Validate rejects input that must never reach the database.
 func (p PlaceOrder) Validate() error {
 	switch {
 	case p.SeatID <= 0:
@@ -54,14 +57,14 @@ func (p PlaceOrder) Validate() error {
 	return nil
 }
 
-
+// Service holds the orchestrator use cases: PlaceOrder and GetOrder for the API, HandleReply for the worker.
 type Service struct {
 	pool *pgxpool.Pool
 	log  *slog.Logger
 	m    *sagaMetrics
 }
 
-
+// NewService builds the service.
 func NewService(pool *pgxpool.Pool, log *slog.Logger) (*Service, error) {
 	m, err := newSagaMetrics()
 	if err != nil {
@@ -70,7 +73,7 @@ func NewService(pool *pgxpool.Pool, log *slog.Logger) (*Service, error) {
 	return &Service{pool: pool, log: log, m: m}, nil
 }
 
-
+// PlaceOrder creates the order and starts its saga.
 func (s *Service) PlaceOrder(ctx context.Context, in PlaceOrder) (Order, bool, error) {
 	if err := in.Validate(); err != nil {
 		return Order{}, false, err
@@ -127,7 +130,6 @@ func (s *Service) PlaceOrder(ctx context.Context, in PlaceOrder) (Order, bool, e
 	return order, created, nil
 }
 
-
 func replay(ctx context.Context, tx pgx.Tx, in PlaceOrder) (Order, error) {
 	existing, err := orderByIdempotencyKey(ctx, tx, in.IdempotencyKey)
 	if err != nil {
@@ -139,13 +141,15 @@ func replay(ctx context.Context, tx pgx.Tx, in PlaceOrder) (Order, error) {
 	return existing, nil
 }
 
+// GetOrder returns the order with its saga state.
 func (s *Service) GetOrder(ctx context.Context, id uuid.UUID) (Order, error) {
 	return orderByID(ctx, s.pool, id)
 }
 
+// ErrUnknownSaga means a reply arrived for a saga this orchestrator never started.
 var ErrUnknownSaga = errors.New("reply for unknown saga")
 
-
+// HandleReply is the inbox.Handler for orchestrator.replies.
 func (s *Service) HandleReply(ctx context.Context, tx pgx.Tx, env message.Envelope) error {
 
 	saga, startedAt, err := sagaForUpdate(ctx, tx, env.SagaID)
@@ -163,7 +167,7 @@ func (s *Service) HandleReply(ctx context.Context, tx pgx.Tx, env message.Envelo
 
 	tr := saga.On(env.Type)
 	if tr.Ignored {
-		
+
 		s.log.DebugContext(ctx, "reply ignored", "saga_id", saga.ID, "state", saga.State, "type", env.Type)
 		s.m.ignored(ctx, env.Type)
 		return nil
@@ -177,7 +181,6 @@ func (s *Service) HandleReply(ctx context.Context, tx pgx.Tx, env message.Envelo
 		"reply", env.Type, "reason", tr.Reason)
 	return nil
 }
-
 
 func (s *Service) apply(ctx context.Context, tx pgx.Tx, saga Saga, tr Transition, startedAt time.Time) error {
 	if err := updateSaga(ctx, tx, saga.ID, tr.Next); err != nil {

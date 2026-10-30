@@ -1,3 +1,4 @@
+// Package migrations embeds the SQL schema and applies it with goose.
 package migrations
 
 import (

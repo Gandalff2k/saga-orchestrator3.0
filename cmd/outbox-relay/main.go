@@ -1,3 +1,4 @@
+// Command outbox-relay publishes one service database's outbox to Kafka.
 package main
 
 import (

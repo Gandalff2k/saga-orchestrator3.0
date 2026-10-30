@@ -13,7 +13,6 @@ import (
 	"github.com/Gandalff2k/saga3/internal/platform/telemetry"
 )
 
-
 type sagaMetrics struct {
 	transitions    metric.Int64Counter
 	ignoredReplies metric.Int64Counter
@@ -59,7 +58,6 @@ func (m *sagaMetrics) transition(ctx context.Context, from, to State, started ti
 func (m *sagaMetrics) ignored(ctx context.Context, replyType string) {
 	m.ignoredReplies.Add(ctx, 1, metric.WithAttributes(attribute.String("type", replyType)))
 }
-
 
 func (m *sagaMetrics) zeroTimeouts(ctx context.Context) {
 	for _, s := range []State{StateReserving, StateCharging, StateRefunding, StateCompensating} {

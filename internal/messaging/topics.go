@@ -1,4 +1,3 @@
-
 package messaging
 
 import (
@@ -7,14 +6,14 @@ import (
 	"github.com/Gandalff2k/saga3/internal/platform/kafka"
 )
 
-
+// Logical topic names; kafka.Namespace adds the environment prefix.
 const (
 	TopicInventoryCommands   = "inventory.commands"
 	TopicPaymentCommands     = "payment.commands"
 	TopicOrchestratorReplies = "orchestrator.replies"
 )
 
-
+// Topics returns the full topology: every main topic plus its DLQ.
 func Topics(partitions int32, replicationFactor int16) []kafka.TopicSpec {
 	minISR := max(1, replicationFactor-1) // RF=3 -> min.insync=2: survive one broker loss without losing acks=all writes
 

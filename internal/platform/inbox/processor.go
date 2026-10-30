@@ -1,3 +1,4 @@
+// Package inbox deduplicates consumed messages in the same transaction as their effects.
 package inbox
 
 import (
@@ -21,19 +22,20 @@ import (
 	"github.com/Gandalff2k/saga3/internal/platform/telemetry"
 )
 
-
+// Handler applies one message inside tx.
 type Handler func(ctx context.Context, tx pgx.Tx, env message.Envelope) error
 
+// Processor adapts a Handler to kafka.Processor.
 type Processor struct {
 	pool       *pgxpool.Pool
-	consumer   string 
+	consumer   string
 	handle     Handler
 	log        *slog.Logger
 	tracer     trace.Tracer
 	duplicates metric.Int64Counter
 }
 
-
+// NewProcessor builds a Processor.
 func NewProcessor(pool *pgxpool.Pool, consumer string, h Handler, log *slog.Logger) (*Processor, error) {
 	dups, err := otel.Meter(telemetry.ScopeName).Int64Counter("inbox_duplicates_total",
 		metric.WithDescription("Messages skipped because their id was already in the inbox (redeliveries)."))
@@ -47,7 +49,7 @@ func NewProcessor(pool *pgxpool.Pool, consumer string, h Handler, log *slog.Logg
 	}, nil
 }
 
-
+// ProcessBatch applies all records in one transaction: one commit per batch, not per message.
 func (p *Processor) ProcessBatch(ctx context.Context, recs []*kgo.Record) error {
 	return postgres.WithTx(ctx, p.pool, func(tx pgx.Tx) error {
 		for _, rec := range recs {
@@ -59,16 +61,17 @@ func (p *Processor) ProcessBatch(ctx context.Context, recs []*kgo.Record) error 
 	})
 }
 
+// ProcessOne is ProcessBatch for a single record (poison isolation path).
 func (p *Processor) ProcessOne(ctx context.Context, rec *kgo.Record) error {
 	return p.ProcessBatch(ctx, []*kgo.Record{rec})
 }
 
-
+// InitMetrics starts the duplicates counter at 0, so its first increase is visible to alerts.
 func (p *Processor) InitMetrics(ctx context.Context) {
 	p.duplicates.Add(ctx, 0, metric.WithAttributes(attribute.String("consumer_group", p.consumer)))
 }
 
-
+// Healthy pings the database: the consumer uses it to tell poison records from an outage.
 func (p *Processor) Healthy(ctx context.Context) error { return p.pool.Ping(ctx) }
 
 func (p *Processor) apply(ctx context.Context, tx pgx.Tx, rec *kgo.Record) error {
@@ -77,7 +80,6 @@ func (p *Processor) apply(ctx context.Context, tx pgx.Tx, rec *kgo.Record) error
 		return retry.Permanent(fmt.Errorf("%s[%d]@%d: %w", rec.Topic, rec.Partition, rec.Offset, err))
 	}
 
-	
 	ctx, span := p.tracer.Start(producerContext(ctx, rec), "process "+env.Type,
 		trace.WithSpanKind(trace.SpanKindConsumer),
 		trace.WithAttributes(
@@ -107,7 +109,6 @@ func (p *Processor) apply(ctx context.Context, tx pgx.Tx, rec *kgo.Record) error
 	}
 	return nil
 }
-
 
 func producerContext(ctx context.Context, rec *kgo.Record) context.Context {
 	if rec.Context != nil {

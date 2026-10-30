@@ -9,16 +9,14 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-
 func plan(owned []int, total, alive int) (keep, release []int, claim int) {
 	fair := fairShare(total, alive)
-	owned = slices.Sorted(slices.Values(owned)) s
+	owned = slices.Sorted(slices.Values(owned))
 	if len(owned) > fair {
 		return owned[:fair], owned[fair:], 0
 	}
 	return owned, nil, fair - len(owned)
 }
-
 
 func fairShare(total, alive int) int {
 	alive = max(alive, 1)
@@ -55,14 +53,12 @@ func (s leaseStore) heartbeat(ctx context.Context) (alive int, err error) {
 	return alive, nil
 }
 
-
 func (s leaseStore) renew(ctx context.Context) ([]int, error) {
 	return s.shards(ctx,
 		`UPDATE outbox_shard_lease SET expires_at = now() + make_interval(secs => $2)
 		 WHERE owner = $1 AND expires_at > now()
 		 RETURNING shard`, s.instance, s.ttl.Seconds())
 }
-
 
 func (s leaseStore) claim(ctx context.Context, n int) ([]int, error) {
 	return s.shards(ctx,
@@ -71,7 +67,6 @@ func (s leaseStore) claim(ctx context.Context, n int) ([]int, error) {
 		   AND shard IN (SELECT shard FROM outbox_shard_lease WHERE expires_at < now() ORDER BY random() LIMIT $3)
 		 RETURNING shard`, s.instance, s.ttl.Seconds(), n)
 }
-
 
 func (s leaseStore) release(ctx context.Context, shards []int) error {
 	_, err := s.pool.Exec(ctx,

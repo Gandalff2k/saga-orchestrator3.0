@@ -14,7 +14,6 @@ type row interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
-
 func insertOrder(ctx context.Context, tx pgx.Tx, id uuid.UUID, in PlaceOrder) (createdAt time.Time, inserted bool, err error) {
 	err = tx.QueryRow(ctx,
 		`INSERT INTO orders (order_id, idempotency_key, seat_id, amount_cents, status)
@@ -86,7 +85,6 @@ func sagaForUpdate(ctx context.Context, tx pgx.Tx, id uuid.UUID) (Saga, time.Tim
 	}
 	return s, started, nil
 }
-
 
 func overdueForUpdate(ctx context.Context, tx pgx.Tx, timeout time.Duration, limit int) ([]Saga, []time.Time, error) {
 	rows, err := tx.Query(ctx,

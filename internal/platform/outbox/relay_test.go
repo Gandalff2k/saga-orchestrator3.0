@@ -89,7 +89,7 @@ func TestRelayConfigValidate(t *testing.T) {
 		t.Fatalf("valid config rejected: %v", err)
 	}
 	bad := ok
-	bad.PublishTimeout = 5e9 
+	bad.PublishTimeout = 5e9
 	if err := bad.Validate(); err == nil {
 		t.Fatal("PublishTimeout >= LeaseTTL/3 must be rejected")
 	}

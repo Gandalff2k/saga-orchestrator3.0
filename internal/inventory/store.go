@@ -26,7 +26,6 @@ func reservationBySaga(ctx context.Context, tx pgx.Tx, sagaID uuid.UUID) (seatID
 	return seatID, status, true, nil
 }
 
-
 func takeSeat(ctx context.Context, tx pgx.Tx, seatID int) (bool, error) {
 	tag, err := tx.Exec(ctx,
 		`UPDATE seats SET status = 'RESERVED' WHERE seat_id = $1 AND status = 'FREE'`, seatID)
@@ -74,7 +73,6 @@ func freeSeat(ctx context.Context, tx pgx.Tx, seatID int) error {
 	}
 	return nil
 }
-
 
 func tombstoneReservation(ctx context.Context, tx pgx.Tx, sagaID uuid.UUID, seatID int) error {
 	_, err := tx.Exec(ctx,

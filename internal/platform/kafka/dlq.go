@@ -10,21 +10,20 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
-
 const maxDLQErrorLen = 1024
 
-
+// DLQProducer publishes failed records to "<topic>.dlq".
 type DLQProducer struct {
 	client *kgo.Client
 	group  string
 }
 
-
+// NewDLQProducer builds a DLQProducer.
 func NewDLQProducer(client *kgo.Client, group string) *DLQProducer {
 	return &DLQProducer{client: client, group: group}
 }
 
-
+// DeadLetter produces synchronously with acks=all, so the caller can commit the offset right after.
 func (d *DLQProducer) DeadLetter(ctx context.Context, rec *kgo.Record, cause error, attempts int) error {
 	dl := dlqRecord(rec, d.group, cause, attempts, time.Now())
 	if err := d.client.ProduceSync(ctx, dl).FirstErr(); err != nil {
@@ -32,7 +31,6 @@ func (d *DLQProducer) DeadLetter(ctx context.Context, rec *kgo.Record, cause err
 	}
 	return nil
 }
-
 
 func dlqRecord(rec *kgo.Record, group string, cause error, attempts int, now time.Time) *kgo.Record {
 	headers := make([]kgo.RecordHeader, 0, len(rec.Headers)+7)
@@ -60,6 +58,6 @@ func dlqRecord(rec *kgo.Record, group string, cause error, attempts int, now tim
 		Key:     rec.Key,
 		Value:   rec.Value,
 		Headers: headers,
-		Context: rec.Context, 
+		Context: rec.Context,
 	}
 }

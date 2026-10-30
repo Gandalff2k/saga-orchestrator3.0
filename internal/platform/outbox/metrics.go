@@ -14,17 +14,15 @@ import (
 	"github.com/Gandalff2k/saga3/internal/platform/telemetry"
 )
 
-
 type metrics struct {
 	published metric.Int64Counter
 	failures  metric.Int64Counter
 	batchDur  metric.Float64Histogram
 
-
 	ownedShards     atomic.Int64
 	backlog         atomic.Int64
 	oldestAgeMillis atomic.Int64
-	statsValid      atomic.Bool 
+	statsValid      atomic.Bool
 }
 
 func newMetrics() (*metrics, error) {

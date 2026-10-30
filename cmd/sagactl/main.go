@@ -22,12 +22,13 @@ import (
 	"text/tabwriter"
 	"time"
 
+	_ "github.com/jackc/pgx/v5/stdlib"
+
 	"github.com/Gandalff2k/saga3/internal/messaging"
 	"github.com/Gandalff2k/saga3/internal/platform/config"
 	"github.com/Gandalff2k/saga3/internal/platform/kafka"
 	"github.com/Gandalff2k/saga3/internal/platform/retry"
 	"github.com/Gandalff2k/saga3/migrations"
-	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 var waitPolicy = retry.Policy{MaxAttempts: 30, Initial: time.Second, Max: 5 * time.Second, Multiplier: 1.5, Jitter: 0.1}

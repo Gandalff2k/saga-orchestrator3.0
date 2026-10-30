@@ -1,4 +1,4 @@
-
+// Package orchestrator runs the order saga: the pure state machine, the service, the HTTP API and the timeout sweeper.
 package orchestrator
 
 import (
@@ -7,8 +7,10 @@ import (
 	"github.com/Gandalff2k/saga3/internal/messaging"
 )
 
+// State is the saga's position in the state machine (persisted in sagas.state).
 type State string
 
+// Saga states; COMPLETED and ABORTED are terminal.
 const (
 	StateReserving    State = "RESERVING"
 	StateCharging     State = "CHARGING"
@@ -18,22 +20,26 @@ const (
 	StateAborted      State = "ABORTED"
 )
 
+// Terminal reports whether no further transitions are possible.
 func (s State) Terminal() bool { return s == StateCompleted || s == StateAborted }
 
-
+// OrderStatus is what the customer sees.
 type OrderStatus string
 
+// Order statuses.
 const (
 	OrderPending   OrderStatus = "PENDING"
 	OrderConfirmed OrderStatus = "CONFIRMED"
 	OrderAborted   OrderStatus = "ABORTED"
 )
 
+// Abort reasons written by the timeout sweeper.
 const (
 	ReasonInventoryTimeout = "timed out waiting for inventory"
 	ReasonPaymentTimeout   = "timed out waiting for payment"
 )
 
+// Saga is the orchestrator's record of one order's distributed transaction.
 type Saga struct {
 	ID          uuid.UUID
 	OrderID     uuid.UUID
@@ -42,18 +48,19 @@ type Saga struct {
 	AmountCents int64
 }
 
-
+// Outgoing is a command the saga wants sent.
 type Outgoing struct {
 	Topic   string
 	Type    string
 	Payload any
 }
 
+// Transition is the result of feeding one reply into the saga.
 type Transition struct {
-	Next  State
-	Order OrderStatus 
-	Reason string
-	Emit   []Outgoing
+	Next    State
+	Order   OrderStatus
+	Reason  string
+	Emit    []Outgoing
 	Ignored bool
 }
 

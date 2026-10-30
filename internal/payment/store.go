@@ -9,7 +9,6 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-
 func recordPayment(ctx context.Context, tx pgx.Tx, sagaID uuid.UUID, amountCents int64, d decision) (decision, error) {
 	err := tx.QueryRow(ctx,
 		`INSERT INTO payments (saga_id, amount_cents, status, reason)
@@ -32,7 +31,6 @@ func recordPayment(ctx context.Context, tx pgx.Tx, sagaID uuid.UUID, amountCents
 	}
 	return stored, nil
 }
-
 
 func refundPayment(ctx context.Context, tx pgx.Tx, sagaID uuid.UUID) (string, error) {
 	tag, err := tx.Exec(ctx,

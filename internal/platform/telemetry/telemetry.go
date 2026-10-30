@@ -1,3 +1,4 @@
+// Package telemetry wires OpenTelemetry traces and metrics, exported over OTLP to the collector.
 package telemetry
 
 import (
@@ -16,17 +17,19 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
+// ScopeName is the instrumentation scope for hand-written spans and metrics.
 const ScopeName = "github.com/Gandalff2k/saga3"
 
+// Config becomes the OTel resource attached to every span and metric.
 type Config struct {
 	ServiceName string
 	Version     string
 	Environment string
 	InstanceID  string
-	Endpoint string
+	Endpoint    string
 }
 
-
+// Init installs global tracer/meter providers and the W3C propagator.
 func Init(ctx context.Context, cfg Config) (shutdown func(context.Context) error, err error) {
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
 		propagation.TraceContext{}, propagation.Baggage{},
@@ -58,7 +61,7 @@ func Init(ctx context.Context, cfg Config) (shutdown func(context.Context) error
 	tp := sdktrace.NewTracerProvider(
 		sdktrace.WithResource(res),
 		sdktrace.WithBatcher(traceExp),
-		sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.AlwaysSample())), 
+		sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.AlwaysSample())),
 	)
 	mp := sdkmetric.NewMeterProvider(
 		sdkmetric.WithResource(res),

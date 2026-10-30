@@ -1,10 +1,12 @@
 package kafka
 
-
+// Namespace prefixes topic names so several environments (or test runs) can share one cluster.
 type Namespace string
 
+// Topic returns the physical name of a logical topic.
 func (n Namespace) Topic(name string) string { return string(n) + name }
 
+// Topics maps Topic over names.
 func (n Namespace) Topics(names []string) []string {
 	out := make([]string, len(names))
 	for i, name := range names {
@@ -13,6 +15,7 @@ func (n Namespace) Topics(names []string) []string {
 	return out
 }
 
+// Specs returns specs with namespaced names.
 func (n Namespace) Specs(specs []TopicSpec) []TopicSpec {
 	out := make([]TopicSpec, len(specs))
 	for i, s := range specs {
@@ -22,10 +25,13 @@ func (n Namespace) Specs(specs []TopicSpec) []TopicSpec {
 	return out
 }
 
+// DLQSuffix is appended to a topic name to get its dead-letter topic.
 const DLQSuffix = ".dlq"
 
+// DLQTopic returns the dead-letter topic for topic.
 func DLQTopic(topic string) string { return topic + DLQSuffix }
 
+// Headers the consumer adds to a dead-lettered record.
 const (
 	HeaderDLQError          = "dlq-error"
 	HeaderDLQOriginalTopic  = "dlq-original-topic"
@@ -36,6 +42,7 @@ const (
 	HeaderDLQFailedAt       = "dlq-failed-at"
 )
 
+// TopicSpec is everything needed to create a topic (see EnsureTopics).
 type TopicSpec struct {
 	Name              string
 	Partitions        int32

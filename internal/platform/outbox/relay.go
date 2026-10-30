@@ -22,7 +22,7 @@ import (
 	"github.com/Gandalff2k/saga3/internal/platform/kafka"
 )
 
-
+// Relay publishes outbox rows of ONE service database to Kafka.
 type Relay struct {
 	pool   *pgxpool.Pool
 	client *kgo.Client
@@ -40,9 +40,9 @@ type shardLease struct {
 	deadline atomic.Int64
 
 	mu       sync.Mutex
-	released bool     
-	failures int       
-	retryAt  time.Time 
+	released bool
+	failures int
+	retryAt  time.Time
 }
 
 func (l *shardLease) setDeadline(t time.Time) { l.deadline.Store(t.UnixNano()) }
@@ -50,6 +50,7 @@ func (l *shardLease) remaining() time.Duration {
 	return time.Until(time.Unix(0, l.deadline.Load()))
 }
 
+// NewRelay builds a Relay.
 func NewRelay(pool *pgxpool.Pool, client *kgo.Client, cfg config.Relay, ns kafka.Namespace, instanceID string, log *slog.Logger) (*Relay, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -71,15 +72,14 @@ func NewRelay(pool *pgxpool.Pool, client *kgo.Client, cfg config.Relay, ns kafka
 	}, nil
 }
 
-
+// Run publishes until ctx is cancelled.
 func (r *Relay) Run(ctx context.Context) error {
 	total, err := r.leases.totalShards(ctx)
 	if err != nil {
 		return err
 	}
 	r.log.InfoContext(ctx, "outbox relay starting", "shards", total)
-	r.m.failures.Add(ctx, 0) 
-
+	r.m.failures.Add(ctx, 0)
 
 	var wg sync.WaitGroup
 	wg.Go(func() { r.leaseLoop(ctx, total) })
@@ -90,7 +90,6 @@ func (r *Relay) Run(ctx context.Context) error {
 	r.shutdown(ctx)
 	return nil
 }
-
 
 func (r *Relay) leaseLoop(ctx context.Context, total int) {
 	t := time.NewTicker(r.cfg.LeaseTTL / 3)
@@ -114,7 +113,7 @@ func (r *Relay) rebalance(ctx context.Context, total int) error {
 		return err
 	}
 
-	t0 := time.Now() 
+	t0 := time.Now()
 	renewed, err := r.leases.renew(ctx)
 	if err != nil {
 		return err
@@ -123,9 +122,9 @@ func (r *Relay) rebalance(ctx context.Context, total int) error {
 
 	keep, release, claim := plan(renewed, total, alive)
 	if len(release) > 0 {
-		r.drop(release) 
+		r.drop(release)
 		if err := r.leases.release(ctx, release); err != nil {
-			return err 
+			return err
 		}
 		r.log.InfoContext(ctx, "shards released", "shards", release, "kept", len(keep), "alive", alive)
 	}
@@ -146,7 +145,6 @@ func (r *Relay) rebalance(ctx context.Context, total int) error {
 	}
 	return nil
 }
-
 
 func (r *Relay) syncOwned(renewed []int, t0 time.Time) {
 	r.mu.Lock()
@@ -204,7 +202,6 @@ func (r *Relay) ownedShards() map[int]*shardLease {
 	return maps.Clone(r.owned)
 }
 
-
 func (r *Relay) shutdown(ctx context.Context) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
@@ -217,7 +214,6 @@ func (r *Relay) shutdown(ctx context.Context) {
 	}
 	r.log.InfoContext(ctx, "outbox relay stopped, leases released", "shards", len(shards))
 }
-
 
 func (r *Relay) publishLoop(ctx context.Context) {
 	t := time.NewTicker(r.cfg.PollInterval)
@@ -237,10 +233,9 @@ func (r *Relay) publishLoop(ctx context.Context) {
 				return nil
 			})
 		}
-		_ = g.Wait() s
+		_ = g.Wait()
 	}
 }
-
 
 func (r *Relay) drainShard(ctx context.Context, shard int, lease *shardLease) {
 	lease.mu.Lock()
@@ -279,7 +274,6 @@ type row struct {
 	Headers map[string]string
 }
 
-.
 func (r *Relay) publishBatch(ctx context.Context, shard int) (published int, full bool, err error) {
 	bctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), r.cfg.PublishTimeout)
 	defer cancel()
@@ -337,9 +331,8 @@ func (r *Relay) markPublished(ctx context.Context, seqs []int64) error {
 	return nil
 }
 
-
 func toRecord(ctx context.Context, rw row, ns kafka.Namespace) *kgo.Record {
-	keys := slices.Sorted(maps.Keys(rw.Headers)) 
+	keys := slices.Sorted(maps.Keys(rw.Headers))
 	headers := make([]kgo.RecordHeader, 0, len(keys))
 	for _, k := range keys {
 		headers = append(headers, kgo.RecordHeader{Key: k, Value: []byte(rw.Headers[k])})
@@ -372,7 +365,6 @@ func acknowledgedPrefix(rows []row, recs []*kgo.Record, results kgo.ProduceResul
 	return seqs, nil
 }
 
-
 const janitorShard = 0
 
 func (r *Relay) ownsJanitor() bool {
@@ -401,7 +393,6 @@ func (r *Relay) janitorLoop(ctx context.Context) {
 		}
 	}
 }
-
 
 func (r *Relay) deletePublished(ctx context.Context) (int64, error) {
 	const chunk = 1000

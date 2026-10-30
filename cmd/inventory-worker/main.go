@@ -1,3 +1,4 @@
+// Command inventory-worker consumes inventory.commands (reserve and release seat).
 package main
 
 import (

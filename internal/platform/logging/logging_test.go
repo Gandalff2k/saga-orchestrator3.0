@@ -9,7 +9,6 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-
 func TestLogger_AddsTraceIDsFromContext(t *testing.T) {
 	var buf bytes.Buffer
 	log := New(&buf, "debug", "json", "inventory-worker", "v1")
@@ -50,7 +49,7 @@ func TestLogger_LevelAndFormat(t *testing.T) {
 	}
 
 	buf.Reset()
-	New(&buf, "nonsense", "json", "svc", "dev").Debug("dropped") 
+	New(&buf, "nonsense", "json", "svc", "dev").Debug("dropped")
 	if buf.Len() != 0 {
 		t.Fatal("unknown level must fall back to info, not debug")
 	}

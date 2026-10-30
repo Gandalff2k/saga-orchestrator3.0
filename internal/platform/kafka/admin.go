@@ -13,7 +13,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 )
 
-
+// EnsureTopics creates missing topics.
 func EnsureTopics(ctx context.Context, cl *kgo.Client, specs []TopicSpec, log *slog.Logger) error {
 	adm := kadm.NewClient(cl)
 	for _, s := range specs {
@@ -61,7 +61,7 @@ func waitReady(ctx context.Context, cl *kgo.Client, specs []TopicSpec) error {
 
 func notReady(ctx context.Context, cl *kgo.Client, names []string) ([]string, error) {
 	req := kmsg.NewPtrMetadataRequest()
-	req.AllowAutoTopicCreation = false 
+	req.AllowAutoTopicCreation = false
 	for _, n := range names {
 		t := kmsg.NewMetadataRequestTopic()
 		t.Topic = kmsg.StringPtr(n)

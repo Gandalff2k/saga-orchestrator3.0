@@ -1,3 +1,4 @@
+// Package inventory is the saga participant that reserves and releases seats.
 package inventory
 
 import (
@@ -14,16 +15,18 @@ import (
 	"github.com/Gandalff2k/saga3/internal/platform/retry"
 )
 
-
+// Service handles inventory commands.
 type Service struct {
 	faults faults.Config
 	log    *slog.Logger
 }
 
+// NewService builds the service; f injects failures for demos (zero value = off).
 func NewService(f faults.Config, log *slog.Logger) *Service {
 	return &Service{faults: f, log: log}
 }
 
+// Handle is the inbox.Handler for inventory.commands.
 func (s *Service) Handle(ctx context.Context, tx pgx.Tx, env message.Envelope) error {
 	if err := s.faults.Maybe(env.Type); err != nil {
 		return err
@@ -52,7 +55,6 @@ const (
 	reasonAlreadyReleased = "reservation already released"
 )
 
-
 func (s *Service) reserve(ctx context.Context, tx pgx.Tx, env message.Envelope, cmd messaging.ReserveSeat) error {
 	heldSeat, status, found, err := reservationBySaga(ctx, tx, env.SagaID)
 	if err != nil {
@@ -62,7 +64,7 @@ func (s *Service) reserve(ctx context.Context, tx pgx.Tx, env message.Envelope, 
 		if status == reservationHeld && heldSeat == cmd.SeatID {
 			return s.reply(ctx, tx, env, messaging.EvtSeatReserved, "")
 		}
-	
+
 		return s.reply(ctx, tx, env, messaging.EvtSeatReservationFailed, reasonAlreadyReleased)
 	}
 
@@ -103,7 +105,6 @@ func (s *Service) release(ctx context.Context, tx pgx.Tx, env message.Envelope, 
 	}
 	return s.reply(ctx, tx, env, messaging.EvtSeatReleased, "")
 }
-
 
 func (s *Service) reply(ctx context.Context, tx pgx.Tx, cause message.Envelope, replyType, reason string) error {
 	r, err := messaging.NewReply(replyType, cause.SagaID, reason)

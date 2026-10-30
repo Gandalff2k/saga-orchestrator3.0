@@ -13,11 +13,13 @@ import (
 	"github.com/Gandalff2k/saga3/internal/platform/message"
 )
 
-
+// ReplayGroup is the consumer group whose offsets mark how far a DLQ was replayed.
 const ReplayGroup = "sagactl-dlq-replay"
 
+// HeaderReplayedFrom marks a replayed record with the DLQ position it came from.
 const HeaderReplayedFrom = "replayed-from"
 
+// DLQEntry is one dead-lettered record as shown by sagactl dlq list.
 type DLQEntry struct {
 	Partition     int32  `json:"partition"`
 	Offset        int64  `json:"offset"`
@@ -31,7 +33,7 @@ type DLQEntry struct {
 	FailedAt      string `json:"failed_at"`
 }
 
-
+// ListDLQ reads up to limit records of a DLQ topic and marks the ones already replayed.
 func ListDLQ(ctx context.Context, brokers []string, dlqTopic string, limit int) ([]DLQEntry, error) {
 	cl, adm, err := dlqClients(brokers)
 	if err != nil {
@@ -64,7 +66,7 @@ func ListDLQ(ctx context.Context, brokers []string, dlqTopic string, limit int) 
 	return out, nil
 }
 
-
+// ReplayDLQ republishes not yet replayed DLQ records to their original topic and returns how many.
 func ReplayDLQ(ctx context.Context, brokers []string, dlqTopic string, limit int, dryRun bool) (int, error) {
 	if !strings.HasSuffix(dlqTopic, DLQSuffix) {
 		return 0, fmt.Errorf("%q is not a DLQ topic (must end with %s)", dlqTopic, DLQSuffix)
@@ -104,7 +106,6 @@ func ReplayDLQ(ctx context.Context, brokers []string, dlqTopic string, limit int
 		return 0, fmt.Errorf("replay produce: %w", err)
 	}
 
-
 	offsets := make(kadm.Offsets)
 	for _, r := range recs {
 		offsets.Add(kadm.Offset{Topic: r.Topic, Partition: r.Partition, At: r.Offset + 1, LeaderEpoch: -1})
@@ -141,14 +142,13 @@ func committed(ctx context.Context, adm *kadm.Client, topic string) (map[int32]i
 	return out, nil
 }
 
-
 func readRange(ctx context.Context, adm *kadm.Client, brokers []string, topic string, from map[int32]int64, limit int) ([]*kgo.Record, error) {
 	ends, err := adm.ListEndOffsets(ctx, topic)
 	if err != nil {
 		return nil, fmt.Errorf("end offsets: %w", err)
 	}
 	starts := map[int32]kgo.Offset{}
-	pending := map[int32]int64{} 
+	pending := map[int32]int64{}
 	ends.Each(func(lo kadm.ListedOffset) {
 		start := from[lo.Partition]
 		if lo.Err == nil && lo.Offset > start {

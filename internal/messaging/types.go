@@ -1,3 +1,4 @@
+// Package messaging is the contract between services: topics, message types and payloads.
 package messaging
 
 import (

@@ -9,7 +9,6 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
 
-
 func TestConsumerMetrics_StartAtZero(t *testing.T) {
 	reader := sdkmetric.NewManualReader()
 	prev := otel.GetMeterProvider()
@@ -40,8 +39,8 @@ func TestConsumerMetrics_StartAtZero(t *testing.T) {
 		}
 	}
 	want := map[string]int{
-		"consumer_records_total":         2, 
-		"consumer_retries_total":         2, 
+		"consumer_records_total":         2,
+		"consumer_retries_total":         2,
 		"consumer_slow_path_total":       1,
 		"consumer_rebalance_hurry_total": 1,
 		"consumer_commit_failures_total": 1,

@@ -24,7 +24,6 @@ var (
 	errPoison    = retry.Permanent(errors.New("poison"))
 )
 
-
 type fakeProc struct {
 	mu         sync.Mutex
 	batchErrs  []error
@@ -206,7 +205,6 @@ func TestHandlePartition(t *testing.T) {
 	}
 }
 
-
 func TestHandlePartition_StopReturnsHandledPrefix(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	proc := &fakeProc{batchErrs: []error{errPoison}, one: func(o int64) error {
@@ -222,7 +220,6 @@ func TestHandlePartition_StopReturnsHandledPrefix(t *testing.T) {
 		t.Fatalf("handled = %d, err = %v; want 3, nil", handled, err)
 	}
 }
-
 
 func TestHandlePartition_UnparkableRecordIsNotHandled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())

@@ -1,3 +1,4 @@
+// Package worker wires a consumer process: pool, inbox, batch consumer, DLQ, janitor, ops server.
 package worker
 
 import (
@@ -16,6 +17,7 @@ import (
 	"github.com/Gandalff2k/saga3/internal/platform/postgres"
 )
 
+// Config is everything a worker needs; embed it in the binary's own config.
 type Config struct {
 	config.Postgres
 	config.Kafka
@@ -23,13 +25,13 @@ type Config struct {
 	config.Inbox
 }
 
-
+// Service is what a worker binary provides: its message handler and optional background loops.
 type Service struct {
 	Handle     inbox.Handler
 	Background []func(ctx context.Context) error
 }
 
-
+// Run blocks until ctx is cancelled or a component fails.
 func Run(ctx context.Context, a *app.App, cfg Config, build func(pool *pgxpool.Pool) (Service, error)) error {
 	pool, err := postgres.NewPool(ctx, cfg.DSN, cfg.MaxConns)
 	if err != nil {

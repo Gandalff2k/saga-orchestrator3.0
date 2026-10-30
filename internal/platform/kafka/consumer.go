@@ -20,30 +20,30 @@ import (
 	"github.com/Gandalff2k/saga3/internal/platform/telemetry"
 )
 
-
+// Processor applies records to the service's database.
 type Processor interface {
 	ProcessBatch(ctx context.Context, recs []*kgo.Record) error
 	ProcessOne(ctx context.Context, rec *kgo.Record) error
 	Healthy(ctx context.Context) error
 }
 
+// DeadLetterer parks a record that cannot be processed (see dlq.go).
 type DeadLetterer interface {
 	DeadLetter(ctx context.Context, rec *kgo.Record, cause error, attempts int) error
 }
-
 
 type groupOffsets interface {
 	CommitRecords(ctx context.Context, rs ...*kgo.Record) error
 	SetOffsets(setOffsets map[string]map[int32]kgo.EpochOffset)
 }
 
-
+// ErrDependencyDown is returned by Run when records keep failing while a dependency is down.
 var ErrDependencyDown = errors.New("dependency down")
 
-
+// Consumer is the batch consumer used by every worker.
 type Consumer struct {
 	client  *kgo.Client
-	offsets groupOffsets 
+	offsets groupOffsets
 	proc    Processor
 	dlq     DeadLetterer
 	cfg     config.Consumer
@@ -52,10 +52,10 @@ type Consumer struct {
 	tracer  trace.Tracer
 
 	mu    sync.Mutex
-	hurry context.CancelFunc 
+	hurry context.CancelFunc
 }
 
-
+// NewConsumer builds a Consumer with its own Kafka client (consumer group + producer for the DLQ).
 func NewConsumer(brokers []string, clientID string, cfg config.Consumer, proc Processor, log *slog.Logger) (*Consumer, error) {
 	m, err := newConsumerMetrics(cfg.Group)
 	if err != nil {
@@ -88,9 +88,10 @@ func NewConsumer(brokers []string, clientID string, cfg config.Consumer, proc Pr
 	return c, nil
 }
 
+// Ping checks broker connectivity (used by /readyz).
 func (c *Consumer) Ping(ctx context.Context) error { return c.client.Ping(ctx) }
 
-
+// Run polls until ctx is cancelled (nil) or a dependency is down (ErrDependencyDown).
 func (c *Consumer) Run(ctx context.Context) error {
 	defer c.client.Close()
 
@@ -110,13 +111,12 @@ func (c *Consumer) Run(ctx context.Context) error {
 		})
 
 		err := c.handlePoll(ctx, byPartition(fetches))
-		c.client.AllowRebalance() 
+		c.client.AllowRebalance()
 		if err != nil {
 			return err
 		}
 	}
 }
-
 
 func (c *Consumer) handlePoll(ctx context.Context, parts [][]*kgo.Record) error {
 	if len(parts) == 0 {
@@ -140,12 +140,11 @@ func (c *Consumer) handlePoll(ctx context.Context, parts [][]*kgo.Record) error 
 			return nil
 		})
 	}
-	_ = g.Wait() 
+	_ = g.Wait()
 
 	c.settle(ctx, parts, handled)
 	return errors.Join(fatals...)
 }
-
 
 func (c *Consumer) settle(ctx context.Context, parts [][]*kgo.Record, handled []int) {
 	var done []*kgo.Record
@@ -179,7 +178,6 @@ func (c *Consumer) settle(ctx context.Context, parts [][]*kgo.Record, handled []
 	}
 }
 
-
 func (c *Consumer) handlePartition(ctx context.Context, recs []*kgo.Record) (handled int, err error) {
 	topic := recs[0].Topic
 	ctx, span := c.tracer.Start(ctx, topic+" process",
@@ -200,7 +198,6 @@ func (c *Consumer) handlePartition(ctx context.Context, recs []*kgo.Record) (han
 	start := time.Now()
 	defer func() { c.m.batch(ctx, topic, len(recs), time.Since(start)) }()
 
-
 	work := context.WithoutCancel(ctx)
 
 	err = retry.Do(ctx, c.cfg.Retry, func(_ context.Context, attempt int) error {
@@ -214,7 +211,7 @@ func (c *Consumer) handlePartition(ctx context.Context, recs []*kgo.Record) (han
 		return len(recs), nil
 	}
 	if ctx.Err() != nil {
-		return 0, nil 
+		return 0, nil
 	}
 	if !retry.IsPermanent(err) {
 		if herr := c.proc.Healthy(work); herr != nil {
@@ -254,13 +251,12 @@ func (c *Consumer) handlePartition(ctx context.Context, recs []*kgo.Record) (han
 		}
 
 		if !c.deadLetter(ctx, rec, err, attempts) {
-			return i, nil 
+			return i, nil
 		}
 		c.m.records(ctx, topic, "dead_lettered", 1)
 	}
 	return len(recs), nil
 }
-
 
 func (c *Consumer) deadLetter(ctx context.Context, rec *kgo.Record, cause error, attempts int) bool {
 	c.log.ErrorContext(ctx, "dead-lettering record", "topic", rec.Topic, "partition", rec.Partition,
@@ -293,7 +289,6 @@ func (c *Consumer) hurryUp(ctx context.Context) {
 	}
 }
 
-
 func byPartition(fetches kgo.Fetches) [][]*kgo.Record {
 	type tp struct {
 		topic     string
@@ -316,7 +311,6 @@ func byPartition(fetches kgo.Fetches) [][]*kgo.Record {
 	})
 	return out
 }
-
 
 func links(recs []*kgo.Record) []trace.Link {
 	var out []trace.Link

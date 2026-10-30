@@ -1,4 +1,4 @@
-
+// Package logging builds the process-wide slog logger.
 package logging
 
 import (
@@ -10,7 +10,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-
+// New returns a JSON (or text) logger tagged with service and version.
 func New(w io.Writer, level, format, service, version string) *slog.Logger {
 	opts := &slog.HandlerOptions{Level: parseLevel(level)}
 

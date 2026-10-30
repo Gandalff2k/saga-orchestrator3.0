@@ -1,4 +1,4 @@
-
+// Package outbox writes messages in the business transaction and relays them to Kafka.
 package outbox
 
 import (
@@ -15,7 +15,7 @@ import (
 	"github.com/Gandalff2k/saga3/internal/platform/message"
 )
 
-
+// Write appends env to topic's outbox inside tx.
 func Write(ctx context.Context, tx pgx.Tx, topic string, env message.Envelope) error {
 	if topic == "" || env.ID == uuid.Nil || env.SagaID == uuid.Nil || env.Type == "" {
 		return errors.New("outbox: topic, message id, saga id and type are required")
@@ -40,7 +40,7 @@ func Write(ctx context.Context, tx pgx.Tx, topic string, env message.Envelope) e
 	return nil
 }
 
-
+// Headers returns the Kafka headers stored with the row: message id, type and the current trace context.
 func Headers(ctx context.Context, env message.Envelope) map[string]string {
 	carrier := propagation.MapCarrier{
 		message.HeaderID:   env.ID.String(),

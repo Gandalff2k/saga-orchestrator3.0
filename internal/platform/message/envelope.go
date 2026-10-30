@@ -1,3 +1,4 @@
+// Package message defines the wire format shared by the outbox, the relay and consumers.
 package message
 
 import (
@@ -9,13 +10,13 @@ import (
 	"github.com/google/uuid"
 )
 
-
+// Standard Kafka headers of every record.
 const (
 	HeaderID   = "message-id"
 	HeaderType = "message-type"
 )
 
-
+// Envelope is the value of every Kafka record.
 type Envelope struct {
 	ID         uuid.UUID       `json:"id"`
 	Type       string          `json:"type"`
@@ -24,6 +25,7 @@ type Envelope struct {
 	Payload    json.RawMessage `json:"payload"`
 }
 
+// New wraps payload into an envelope with a fresh message id.
 func New(msgType string, sagaID uuid.UUID, payload any) (Envelope, error) {
 	raw, err := json.Marshal(payload)
 	if err != nil {
@@ -42,10 +44,10 @@ func New(msgType string, sagaID uuid.UUID, payload any) (Envelope, error) {
 	}, nil
 }
 
-
+// ErrInvalid marks a record that can never be processed (bad JSON, missing fields).
 var ErrInvalid = errors.New("invalid envelope")
 
-
+// Unmarshal parses and validates a record value.
 func Unmarshal(data []byte) (Envelope, error) {
 	var e Envelope
 	if err := json.Unmarshal(data, &e); err != nil {
@@ -62,6 +64,7 @@ func Unmarshal(data []byte) (Envelope, error) {
 	return e, nil
 }
 
+// DecodePayload unmarshals the payload into v.
 func (e Envelope) DecodePayload(v any) error {
 	if err := json.Unmarshal(e.Payload, v); err != nil {
 		return fmt.Errorf("%w: %s payload: %w", ErrInvalid, e.Type, err)

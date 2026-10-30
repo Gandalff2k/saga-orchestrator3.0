@@ -1,3 +1,4 @@
+// Command payment-worker consumes payment.commands (charge and refund).
 package main
 
 import (

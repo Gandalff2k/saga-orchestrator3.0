@@ -13,19 +13,21 @@ import (
 	"github.com/Gandalff2k/saga3/internal/platform/postgres"
 )
 
-const janitorLockKey = int64(0x1b0c_7a9e) 
+const janitorLockKey = int64(0x1b0c_7a9e)
 
-
+// Janitor deletes inbox rows older than the retention.
 type Janitor struct {
 	pool *pgxpool.Pool
 	cfg  config.Inbox
 	log  *slog.Logger
 }
 
+// NewJanitor builds a Janitor.
 func NewJanitor(pool *pgxpool.Pool, cfg config.Inbox, log *slog.Logger) *Janitor {
 	return &Janitor{pool: pool, cfg: cfg, log: log}
 }
 
+// Run cleans up every JanitorInterval until ctx is cancelled.
 func (j *Janitor) Run(ctx context.Context) error {
 	t := time.NewTicker(j.cfg.JanitorInterval)
 	defer t.Stop()
@@ -45,7 +47,7 @@ func (j *Janitor) Run(ctx context.Context) error {
 	}
 }
 
-
+// Clean deletes expired rows in chunks.
 func (j *Janitor) Clean(ctx context.Context) (int64, error) {
 	const chunk = 1000
 	var total int64

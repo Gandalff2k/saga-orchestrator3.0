@@ -1,3 +1,4 @@
+// Command orchestrator-api is the public HTTP API that starts sagas.
 package main
 
 import (

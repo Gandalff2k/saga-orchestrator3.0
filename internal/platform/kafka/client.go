@@ -1,3 +1,4 @@
+// Package kafka holds the franz-go client, topic admin, the batch consumer and the DLQ.
 package kafka
 
 import (
@@ -11,10 +12,10 @@ import (
 	"github.com/Gandalff2k/saga3/internal/platform/config"
 )
 
-
+// NewClient builds a traced, metered kgo client.
 func NewClient(brokers []string, clientID string, opts ...kgo.Opt) (*kgo.Client, error) {
 	k := kotel.NewKotel(
-		kotel.WithTracer(kotel.NewTracer()), 
+		kotel.WithTracer(kotel.NewTracer()),
 		kotel.WithMeter(kotel.NewMeter()),
 	)
 
@@ -30,6 +31,7 @@ func NewClient(brokers []string, clientID string, opts ...kgo.Opt) (*kgo.Client,
 	return cl, nil
 }
 
+// ProducerOpts returns options for durable producing, ordered per key.
 func ProducerOpts() []kgo.Opt {
 	return []kgo.Opt{
 		kgo.RequiredAcks(kgo.AllISRAcks()),
@@ -38,7 +40,6 @@ func ProducerOpts() []kgo.Opt {
 		kgo.RecordRetries(10),
 	}
 }
-
 
 func consumerOpts(cfg config.Consumer) []kgo.Opt {
 	opts := []kgo.Opt{
@@ -50,7 +51,7 @@ func consumerOpts(cfg config.Consumer) []kgo.Opt {
 		kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()),
 		kgo.FetchMaxWait(500 * time.Millisecond),
 	}
-	if cfg.SessionTimeout > 0 { 
+	if cfg.SessionTimeout > 0 {
 		opts = append(opts,
 			kgo.SessionTimeout(cfg.SessionTimeout),
 			kgo.HeartbeatInterval(cfg.SessionTimeout/5),
@@ -59,6 +60,7 @@ func consumerOpts(cfg config.Consumer) []kgo.Opt {
 	return opts
 }
 
+// Ping checks broker connectivity (used by /readyz).
 func Ping(cl *kgo.Client) func(ctx context.Context) error {
 	return func(ctx context.Context) error { return cl.Ping(ctx) }
 }

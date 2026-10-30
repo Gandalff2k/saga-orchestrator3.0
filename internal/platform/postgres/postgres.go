@@ -1,3 +1,4 @@
+// Package postgres provides the traced pgx pool and the transaction helper every store uses.
 package postgres
 
 import (
@@ -10,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-
+// NewPool opens a traced pool and pings it, so a wrong DSN fails at startup.
 func NewPool(ctx context.Context, dsn string, maxConns int32) (*pgxpool.Pool, error) {
 	cfg, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
@@ -32,10 +33,12 @@ func NewPool(ctx context.Context, dsn string, maxConns int32) (*pgxpool.Pool, er
 	return pool, nil
 }
 
+// TxBeginner is satisfied by *pgxpool.Pool and pgx.Tx (nested = savepoint).
 type TxBeginner interface {
 	Begin(ctx context.Context) (pgx.Tx, error)
 }
 
+// WithTx runs fn in a transaction: commit on nil, rollback on error or panic.
 func WithTx(ctx context.Context, db TxBeginner, fn func(tx pgx.Tx) error) (err error) {
 	tx, err := db.Begin(ctx)
 	if err != nil {

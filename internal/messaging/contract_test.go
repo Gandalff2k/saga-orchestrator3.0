@@ -11,7 +11,6 @@ import (
 
 var update = flag.Bool("update", false, "rewrite testdata/*.json golden files")
 
-
 var contract = map[string]any{
 	CmdReserveSeat:           ReserveSeat{SeatID: 12},
 	CmdReleaseSeat:           ReleaseSeat{SeatID: 12},
@@ -24,7 +23,6 @@ var contract = map[string]any{
 	EvtPaymentFailed:         Reply{Reason: "amount exceeds the payment limit"},
 	EvtPaymentRefunded:       Reply{},
 }
-
 
 func TestContract_PayloadsMatchGoldenFiles(t *testing.T) {
 	for typ, payload := range contract {
