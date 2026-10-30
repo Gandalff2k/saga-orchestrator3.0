@@ -40,7 +40,10 @@ func main() {
 		}
 		defer client.Close()
 
-		relay := outbox.NewRelay(pool, client, c.Relay, a.Config.InstanceID, a.Log)
+		relay, err := outbox.NewRelay(pool, client, c.Relay, a.Config.InstanceID, a.Log)
+		if err != nil {
+			return err
+		}
 
 		g, ctx := errgroup.WithContext(ctx)
 		g.Go(func() error {

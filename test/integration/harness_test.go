@@ -15,9 +15,11 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/testcontainers/testcontainers-go"
@@ -35,9 +37,10 @@ import (
 var env *Env
 
 type Env struct {
-	DSN     map[string]string // service -> DSN, migrated
-	Brokers []string          // topics created (RF=1, 3 partitions)
-	Log     *slog.Logger
+	DSN      map[string]string // service -> DSN, migrated
+	Brokers  []string          // topics created (RF=1, 3 partitions)
+	Log      *slog.Logger
+	adminDSN string
 }
 
 func TestMain(m *testing.M) {
@@ -98,7 +101,7 @@ func run(m *testing.M) int {
 		return 1
 	}
 
-	env = &Env{DSN: dsns, Brokers: brokers, Log: log}
+	env = &Env{DSN: dsns, Brokers: brokers, Log: log, adminDSN: adminDSN}
 	return m.Run()
 }
 
@@ -113,6 +116,51 @@ func (e *Env) Pool(t *testing.T, service string) *pgxpool.Pool {
 	return pool
 }
 
+// FreshDB creates an isolated, migrated database for one test (its own
+// outbox, leases and relay members) and returns a pool to it. The database is
+// dropped when the test ends.
+func (e *Env) FreshDB(t *testing.T, service string) *pgxpool.Pool {
+	t.Helper()
+	name := "it_" + strings.ReplaceAll(uuid.NewString()[:13], "-", "")
+	dsn, err := createDB(t.Context(), e.adminDSN, name, service, e.Log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		admin, err := sql.Open("pgx", e.adminDSN)
+		if err != nil {
+			return
+		}
+		defer func() { _ = admin.Close() }()
+		_, _ = admin.ExecContext(ctx, "DROP DATABASE IF EXISTS "+name+" WITH (FORCE)")
+	})
+
+	pool, err := postgres.NewPool(t.Context(), dsn, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close) // LIFO: runs before the DROP above
+	return pool
+}
+
+// FreshTopic creates a uniquely named topic for one test.
+func (e *Env) FreshTopic(t *testing.T, partitions int32) string {
+	t.Helper()
+	name := "it-" + uuid.NewString()
+	cl, err := kafka.NewClient(e.Brokers, "it-admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cl.Close()
+	spec := []kafka.TopicSpec{{Name: name, Partitions: partitions, ReplicationFactor: 1}}
+	if err := kafka.EnsureTopics(t.Context(), cl, spec, e.Log); err != nil {
+		t.Fatal(err)
+	}
+	return name
+}
+
 // terminate reports (not fails on) cleanup errors: Ryuk reaps leftovers anyway,
 // but a container that won't stop is worth seeing in the output.
 func terminate(name string, c testcontainers.Container) {
@@ -124,35 +172,45 @@ func terminate(name string, c testcontainers.Container) {
 // createAndMigrate creates one database per service (like deploy/compose/postgres-init.sql)
 // and applies migrations with the same code `sagactl migrate` uses.
 func createAndMigrate(ctx context.Context, adminDSN string, log *slog.Logger) (map[string]string, error) {
-	admin, err := sql.Open("pgx", adminDSN)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = admin.Close() }() // statements already ran; a close error changes nothing
-
 	out := map[string]string{}
 	for _, svc := range migrations.Services {
-		if _, err := admin.ExecContext(ctx, "CREATE DATABASE "+svc); err != nil {
-			return nil, err
-		}
-		u, err := url.Parse(adminDSN)
+		dsn, err := createDB(ctx, adminDSN, svc, svc, log)
 		if err != nil {
 			return nil, err
 		}
-		u.Path = "/" + svc
-		out[svc] = u.String()
-
-		db, err := sql.Open("pgx", out[svc])
-		if err != nil {
-			return nil, err
-		}
-		err = migrations.Up(ctx, db, svc, log)
-		_ = db.Close()
-		if err != nil {
-			return nil, err
-		}
+		out[svc] = dsn
 	}
 	return out, nil
+}
+
+// createDB creates database name, applies the platform + service migrations
+// and returns its DSN.
+func createDB(ctx context.Context, adminDSN, name, service string, log *slog.Logger) (string, error) {
+	admin, err := sql.Open("pgx", adminDSN)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = admin.Close() }() // statements already ran; a close error changes nothing
+	if _, err := admin.ExecContext(ctx, "CREATE DATABASE "+name); err != nil {
+		return "", fmt.Errorf("create database %s: %w", name, err)
+	}
+
+	u, err := url.Parse(adminDSN)
+	if err != nil {
+		return "", err
+	}
+	u.Path = "/" + name
+	dsn := u.String()
+
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = db.Close() }()
+	if err := migrations.Up(ctx, db, service, log); err != nil {
+		return "", err
+	}
+	return dsn, nil
 }
 
 func createTopics(ctx context.Context, brokers []string, log *slog.Logger) error {

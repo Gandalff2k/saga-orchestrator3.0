@@ -3,6 +3,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -64,10 +65,34 @@ type Consumer struct {
 type Relay struct {
 	BatchSize    int           `env:"RELAY_BATCH_SIZE" envDefault:"500"`
 	PollInterval time.Duration `env:"RELAY_POLL_INTERVAL" envDefault:"200ms"`
-	LeaseTTL     time.Duration `env:"RELAY_LEASE_TTL" envDefault:"15s"`
+	// LeaseTTL: a crashed replica's shards are taken over after at most this long.
+	// Leases are renewed every LeaseTTL/3.
+	LeaseTTL time.Duration `env:"RELAY_LEASE_TTL" envDefault:"15s"`
+	// PublishTimeout bounds one batch (produce + mark). Must be < LeaseTTL/3 so
+	// a batch never outlives the lease it started under (Validate enforces it).
+	PublishTimeout time.Duration `env:"RELAY_PUBLISH_TIMEOUT" envDefault:"4s"`
+	// Concurrency: owned shards published in parallel by one replica.
+	Concurrency int `env:"RELAY_CONCURRENCY" envDefault:"4"`
 	// Retention of published rows before the janitor deletes them.
-	Retention time.Duration `env:"RELAY_RETENTION" envDefault:"24h"`
-	Retry     retry.Policy  `envPrefix:"RELAY_RETRY_"`
+	Retention       time.Duration `env:"RELAY_RETENTION" envDefault:"24h"`
+	JanitorInterval time.Duration `env:"RELAY_JANITOR_INTERVAL" envDefault:"1m"`
+	// Retry is the per-shard backoff after a failed batch (MaxAttempts is
+	// ignored: the relay never gives up, a row must not be skipped).
+	Retry retry.Policy `envPrefix:"RELAY_RETRY_"`
+}
+
+// Validate rejects combinations that would break the relay's safety margins.
+func (r Relay) Validate() error {
+	switch {
+	case r.BatchSize <= 0 || r.Concurrency <= 0:
+		return errors.New("relay: RELAY_BATCH_SIZE and RELAY_CONCURRENCY must be positive")
+	case r.PollInterval <= 0 || r.JanitorInterval <= 0:
+		return errors.New("relay: intervals must be positive")
+	case r.PublishTimeout <= 0 || r.PublishTimeout >= r.LeaseTTL/3:
+		return fmt.Errorf("relay: RELAY_PUBLISH_TIMEOUT (%s) must be in (0, RELAY_LEASE_TTL/3 = %s)",
+			r.PublishTimeout, r.LeaseTTL/3)
+	}
+	return nil
 }
 
 // Topics sizes topics created by `sagactl topics`.
