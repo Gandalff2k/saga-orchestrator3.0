@@ -97,8 +97,6 @@ Workers scale by consumer lag with KEDA, not CPU: a worker waiting on the databa
 
 PgBouncer in transaction mode for the API and workers: every transaction lives on one server connection and the janitor lock is transaction scoped, so it is safe. Relays connect directly to keep their lease timing predictable. An optional compose override.
 
-Every decision with the rejected options is in DECISIONS.md and docs/adr.
-
 ## Tests and tools
 
 pgx for Postgres, franz-go for Kafka (cooperative sticky rebalancing, idempotent producer), goose for migrations, OpenTelemetry for traces and metrics, slog for JSON logs with trace_id, testcontainers for integration tests, k6 for load. Stdlib testing only, fakes are written by hand.
