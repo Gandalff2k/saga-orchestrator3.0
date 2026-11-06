@@ -19,12 +19,14 @@ type OrderService interface {
 
 // NewHTTPHandler exposes the public API:
 //
-//	POST /orders        {"seat_id":1,"amount_cents":10000}  [Idempotency-Key: <key>]
+//	POST /orders        {"seat_id":1,"amount_cents":10000,"customer_id":"cus_1",
+//	                     "card_number":"4242424242424242","ip_address":"203.0.113.7","country":"UA"}
+//	                    [Idempotency-Key: <key>]
 //	                    -> 202 Accepted (saga started) | 200 OK (same key replayed)
 //	                    -> 422 (same key, different body) | 400 (validation)
 //	GET  /orders/{id}   -> 200 | 404
-func NewHTTPHandler(svc OrderService, log *slog.Logger) http.Handler {
-	h := &httpHandler{svc: svc, log: log}
+func NewHTTPHandler(svc OrderService, cards CardHasher, log *slog.Logger) http.Handler {
+	h := &httpHandler{svc: svc, cards: cards, log: log}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /orders", h.placeOrder)
 	mux.HandleFunc("GET /orders/{id}", h.getOrder)
@@ -43,13 +45,18 @@ func spanName(_ string, r *http.Request) string {
 }
 
 type httpHandler struct {
-	svc OrderService
-	log *slog.Logger
+	svc   OrderService
+	cards CardHasher
+	log   *slog.Logger
 }
 
 type placeOrderRequest struct {
-	SeatID      int   `json:"seat_id"`
-	AmountCents int64 `json:"amount_cents"`
+	SeatID      int    `json:"seat_id"`
+	AmountCents int64  `json:"amount_cents"`
+	CustomerID  string `json:"customer_id"`
+	CardNumber  string `json:"card_number"`
+	IPAddress   string `json:"ip_address"`
+	Country     string `json:"country"`
 }
 
 func (h *httpHandler) placeOrder(w http.ResponseWriter, r *http.Request) {
@@ -61,9 +68,19 @@ func (h *httpHandler) placeOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	cardHash, err := h.cards.Hash(req.CardNumber)
+	if err != nil {
+		h.writeError(w, r, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	order, created, err := h.svc.PlaceOrder(r.Context(), PlaceOrder{
 		SeatID:         req.SeatID,
 		AmountCents:    req.AmountCents,
+		CustomerID:     req.CustomerID,
+		CardHash:       cardHash,
+		IP:             req.IPAddress,
+		Country:        req.Country,
 		IdempotencyKey: r.Header.Get("Idempotency-Key"),
 	})
 	if err != nil {

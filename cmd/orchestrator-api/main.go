@@ -16,12 +16,18 @@ import (
 
 type cfg struct {
 	config.Postgres
-	HTTPAddr string `env:"HTTP_ADDR" envDefault:":8080"`
+	HTTPAddr    string `env:"HTTP_ADDR" envDefault:":8080"`
+	CardHashKey string `env:"CARD_HASH_KEY,required,unset"`
 }
 
 func main() {
 	app.Main(func(ctx context.Context, a *app.App) error {
 		c, err := config.Load[cfg]()
+		if err != nil {
+			return err
+		}
+
+		cards, err := orchestrator.NewCardHasher([]byte(c.CardHashKey))
 		if err != nil {
 			return err
 		}
@@ -38,7 +44,7 @@ func main() {
 		}
 		api := &http.Server{
 			Addr:              c.HTTPAddr,
-			Handler:           orchestrator.NewHTTPHandler(svc, a.Log),
+			Handler:           orchestrator.NewHTTPHandler(svc, cards, a.Log),
 			ReadHeaderTimeout: httpserver.DefaultReadHeaderTimeout,
 		}
 

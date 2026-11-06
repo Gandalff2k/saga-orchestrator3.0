@@ -154,7 +154,7 @@ func TestFlow_PaymentDeclined_Compensates(t *testing.T) {
 	for _, r := range outboxRowsForKey(t, s.orchDB, o.SagaID.String()) {
 		types = append(types, r.Type)
 	}
-	if want := []string{messaging.CmdReserveSeat, messaging.CmdCharge, messaging.CmdReleaseSeat}; strings.Join(types, ",") != strings.Join(want, ",") {
+	if want := []string{messaging.CmdScore, messaging.CmdReserveSeat, messaging.CmdCharge, messaging.CmdReleaseSeat}; strings.Join(types, ",") != strings.Join(want, ",") {
 		t.Errorf("orchestrator commands = %v, want %v", types, want)
 	}
 	s.assertNoDLQ()

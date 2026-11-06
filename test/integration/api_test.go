@@ -3,10 +3,10 @@
 package integration
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -17,13 +17,14 @@ import (
 // The public API end to end over real HTTP and a real database.
 func TestAPI_PlaceAndGetOrder_WithIdempotencyKey(t *testing.T) {
 	svc, pool := newOrchestrator(t)
-	srv := httptest.NewServer(orchestrator.NewHTTPHandler(svc, env.Log))
+	srv := httptest.NewServer(orchestrator.NewHTTPHandler(svc, testCards(t), env.Log))
 	t.Cleanup(srv.Close)
 
 	key := "it-http-" + uuid.NewString()
-	post := func(body string) (int, http.Header, orchestrator.Order) {
+	b := newBuyer()
+	post := func(body []byte) (int, http.Header, orchestrator.Order) {
 		t.Helper()
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, srv.URL+"/orders", strings.NewReader(body))
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, srv.URL+"/orders", bytes.NewReader(body))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -32,7 +33,7 @@ func TestAPI_PlaceAndGetOrder_WithIdempotencyKey(t *testing.T) {
 		return do(t, req)
 	}
 
-	status, hdr, first := post(`{"seat_id": 5, "amount_cents": 2500}`)
+	status, hdr, first := post(orderJSON(5, 2500, b))
 	if status != http.StatusAccepted {
 		t.Fatalf("first POST: %d", status)
 	}
@@ -40,12 +41,12 @@ func TestAPI_PlaceAndGetOrder_WithIdempotencyKey(t *testing.T) {
 		t.Errorf("Location = %q", loc)
 	}
 
-	status, _, second := post(`{"seat_id": 5, "amount_cents": 2500}`)
+	status, _, second := post(orderJSON(5, 2500, b))
 	if status != http.StatusOK || second.ID != first.ID {
 		t.Fatalf("replay: %d, order %v (want 200, %v)", status, second.ID, first.ID)
 	}
 
-	status, _, _ = post(`{"seat_id": 6, "amount_cents": 2500}`)
+	status, _, _ = post(orderJSON(6, 2500, b))
 	if status != http.StatusUnprocessableEntity {
 		t.Fatalf("same key, other body: %d, want 422", status)
 	}
@@ -55,7 +56,7 @@ func TestAPI_PlaceAndGetOrder_WithIdempotencyKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	status, _, got := do(t, req)
-	if status != http.StatusOK || got.Status != orchestrator.OrderPending || got.SagaState != orchestrator.StateReserving {
+	if status != http.StatusOK || got.Status != orchestrator.OrderPending || got.SagaState != orchestrator.StateScoring {
 		t.Fatalf("GET: %d %+v", status, got)
 	}
 

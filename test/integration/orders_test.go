@@ -81,11 +81,12 @@ func TestPlaceOrder_WritesOrderSagaAndFirstCommand(t *testing.T) {
 		TraceID: traceID, SpanID: trace.SpanID{1, 2, 3, 4, 5, 6, 7, 8}, TraceFlags: trace.FlagsSampled,
 	}))
 
-	order, created, err := svc.PlaceOrder(ctx, orchestrator.PlaceOrder{SeatID: 7, AmountCents: 12_345})
+	in := orderIn(7, 12_345, "")
+	order, created, err := svc.PlaceOrder(ctx, in)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !created || order.Status != orchestrator.OrderPending || order.SagaState != orchestrator.StateReserving {
+	if !created || order.Status != orchestrator.OrderPending || order.SagaState != orchestrator.StateScoring {
 		t.Fatalf("order = %+v, created = %v", order, created)
 	}
 	if order.ID.Version() != 7 || order.SagaID.Version() != 7 {
@@ -97,11 +98,12 @@ func TestPlaceOrder_WritesOrderSagaAndFirstCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.SagaID != order.SagaID || got.SeatID != 7 || got.AmountCents != 12_345 || got.CreatedAt.IsZero() {
+	if got.SagaID != order.SagaID || got.SeatID != 7 || got.AmountCents != 12_345 || got.CreatedAt.IsZero() ||
+		got.CustomerID != in.CustomerID || got.CardHash != in.CardHash || got.IP != in.IP || got.Country != in.Country {
 		t.Fatalf("stored order = %+v, want %+v", got, order)
 	}
-	if n := count(t, pool, `SELECT count(*) FROM sagas WHERE saga_id = $1 AND state = 'RESERVING'`, order.SagaID); n != 1 {
-		t.Fatalf("saga in RESERVING: %d rows", n)
+	if n := count(t, pool, `SELECT count(*) FROM sagas WHERE saga_id = $1 AND state = 'SCORING'`, order.SagaID); n != 1 {
+		t.Fatalf("saga in SCORING: %d rows", n)
 	}
 
 	// outbox: exactly the first command, unpublished, keyed by saga id
@@ -110,7 +112,7 @@ func TestPlaceOrder_WritesOrderSagaAndFirstCommand(t *testing.T) {
 		t.Fatalf("outbox rows = %d, want 1", len(rows))
 	}
 	r := rows[0]
-	if r.Topic != messaging.TopicInventoryCommands || r.Type != messaging.CmdReserveSeat || r.PublishedAt != nil {
+	if r.Topic != messaging.TopicRiskCommands || r.Type != messaging.CmdScore || r.PublishedAt != nil {
 		t.Fatalf("outbox row = %+v", r)
 	}
 	if r.Shard < 0 || r.Shard > 15 {
@@ -122,8 +124,9 @@ func TestPlaceOrder_WritesOrderSagaAndFirstCommand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var cmd messaging.ReserveSeat
-	if err := envl.DecodePayload(&cmd); err != nil || cmd.SeatID != 7 {
+	var cmd messaging.Score
+	if err := envl.DecodePayload(&cmd); err != nil || cmd.AmountCents != 12_345 || cmd.CustomerID != in.CustomerID ||
+		cmd.CardHash != in.CardHash || cmd.IP != in.IP || cmd.Country != in.Country {
 		t.Fatalf("command payload = %+v, err = %v", cmd, err)
 	}
 	if envl.ID != r.ID || envl.SagaID != order.SagaID {
@@ -131,7 +134,7 @@ func TestPlaceOrder_WritesOrderSagaAndFirstCommand(t *testing.T) {
 	}
 
 	// headers carry message metadata and the caller's trace
-	if r.Headers[message.HeaderID] != r.ID.String() || r.Headers[message.HeaderType] != messaging.CmdReserveSeat {
+	if r.Headers[message.HeaderID] != r.ID.String() || r.Headers[message.HeaderType] != messaging.CmdScore {
 		t.Errorf("headers = %v", r.Headers)
 	}
 	if tp := r.Headers["traceparent"]; !strings.Contains(tp, traceID.String()) {
@@ -142,7 +145,7 @@ func TestPlaceOrder_WritesOrderSagaAndFirstCommand(t *testing.T) {
 func TestPlaceOrder_IdempotencyKey(t *testing.T) {
 	svc, pool := newOrchestrator(t)
 	key := "it-" + uuid.NewString()
-	in := orchestrator.PlaceOrder{SeatID: 3, AmountCents: 500, IdempotencyKey: key}
+	in := orderIn(3, 500, key)
 
 	first, created, err := svc.PlaceOrder(t.Context(), in)
 	if err != nil || !created {
@@ -160,15 +163,15 @@ func TestPlaceOrder_IdempotencyKey(t *testing.T) {
 	}
 
 	t.Run("same key, different body is rejected", func(t *testing.T) {
-		_, _, err := svc.PlaceOrder(t.Context(), orchestrator.PlaceOrder{SeatID: 4, AmountCents: 500, IdempotencyKey: key})
+		_, _, err := svc.PlaceOrder(t.Context(), orderIn(4, 500, key))
 		if !errors.Is(err, orchestrator.ErrIdempotencyKeyReused) {
 			t.Fatalf("want ErrIdempotencyKeyReused, got %v", err)
 		}
 	})
 
 	t.Run("no key: every request is a new order", func(t *testing.T) {
-		a, _, errA := svc.PlaceOrder(t.Context(), orchestrator.PlaceOrder{SeatID: 3, AmountCents: 500})
-		b, _, errB := svc.PlaceOrder(t.Context(), orchestrator.PlaceOrder{SeatID: 3, AmountCents: 500})
+		a, _, errA := svc.PlaceOrder(t.Context(), orderIn(3, 500, ""))
+		b, _, errB := svc.PlaceOrder(t.Context(), orderIn(3, 500, ""))
 		if errA != nil || errB != nil || a.ID == b.ID {
 			t.Fatalf("a=%v b=%v errs=%v,%v", a.ID, b.ID, errA, errB)
 		}
@@ -180,7 +183,7 @@ func TestPlaceOrder_IdempotencyKey(t *testing.T) {
 func TestPlaceOrder_ConcurrentSameKey(t *testing.T) {
 	svc, pool := newOrchestrator(t)
 	key := "it-race-" + uuid.NewString()
-	in := orchestrator.PlaceOrder{SeatID: 9, AmountCents: 900, IdempotencyKey: key}
+	in := orderIn(9, 900, key)
 
 	const n = 20
 	var (
@@ -229,7 +232,7 @@ func TestPlaceOrder_OutboxFailureRollsBackEverything(t *testing.T) {
 	mustExec(t, pool, `
 		CREATE OR REPLACE FUNCTION it_fail_outbox() RETURNS trigger AS $$
 		BEGIN
-			IF (NEW.payload->'payload'->>'seat_id')::int = 987654 THEN
+			IF (NEW.payload->'payload'->>'amount_cents')::bigint = 987654 THEN
 				RAISE EXCEPTION 'injected outbox failure';
 			END IF;
 			RETURN NEW;
@@ -241,7 +244,7 @@ func TestPlaceOrder_OutboxFailureRollsBackEverything(t *testing.T) {
 	})
 
 	key := "it-rollback-" + uuid.NewString()
-	_, _, err := svc.PlaceOrder(ctx, orchestrator.PlaceOrder{SeatID: poisonSeat, AmountCents: 100, IdempotencyKey: key})
+	_, _, err := svc.PlaceOrder(ctx, orderIn(poisonSeat, 987_654, key))
 	if err == nil || !strings.Contains(err.Error(), "injected outbox failure") {
 		t.Fatalf("want injected failure, got %v", err)
 	}
@@ -268,4 +271,10 @@ func mustExec(t *testing.T, pool *pgxpool.Pool, sql string) {
 	if _, err := pool.Exec(ctx, sql); err != nil {
 		t.Fatalf("%s: %v", strings.TrimSpace(sql), err)
 	}
+}
+
+func orderIn(seat int, amountCents int64, key string) orchestrator.PlaceOrder {
+	b := newBuyer()
+	return orchestrator.PlaceOrder{SeatID: seat, AmountCents: amountCents, CustomerID: b.customer,
+		CardHash: "hash-" + b.card, IP: b.ip, Country: b.country, IdempotencyKey: key}
 }

@@ -17,9 +17,10 @@ type cfg struct {
 	worker.Config
 	// SagaStepTimeout: a saga that hasn't moved this long is compensated by
 	// the sweeper. Only this deployment reads it (D-604).
-	SagaStepTimeout time.Duration `env:"SAGA_STEP_TIMEOUT" envDefault:"30s"`
-	SweepInterval   time.Duration `env:"SAGA_SWEEP_INTERVAL" envDefault:"5s"`
-	SweepBatch      int           `env:"SAGA_SWEEP_BATCH" envDefault:"100"`
+	SagaStepTimeout   time.Duration `env:"SAGA_STEP_TIMEOUT" envDefault:"30s"`
+	SagaReviewTimeout time.Duration `env:"SAGA_REVIEW_TIMEOUT" envDefault:"30m"`
+	SweepInterval     time.Duration `env:"SAGA_SWEEP_INTERVAL" envDefault:"5s"`
+	SweepBatch        int           `env:"SAGA_SWEEP_BATCH" envDefault:"100"`
 }
 
 func main() {
@@ -33,7 +34,9 @@ func main() {
 			if err != nil {
 				return worker.Service{}, err
 			}
-			sweeper := orchestrator.NewSweeper(pool, svc, c.SagaStepTimeout, c.SweepInterval, c.SweepBatch, a.Log)
+			sweeper := orchestrator.NewSweeper(pool, svc,
+				orchestrator.Timeouts{Step: c.SagaStepTimeout, Review: c.SagaReviewTimeout},
+				c.SweepInterval, c.SweepBatch, a.Log)
 			return worker.Service{Handle: svc.HandleReply, Background: []func(context.Context) error{sweeper.Run}}, nil
 		})
 	})

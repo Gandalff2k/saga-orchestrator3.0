@@ -26,6 +26,7 @@ import (
 	"github.com/Gandalff2k/saga3/internal/platform/outbox"
 	"github.com/Gandalff2k/saga3/internal/platform/postgres"
 	"github.com/Gandalff2k/saga3/internal/platform/retry"
+	"github.com/Gandalff2k/saga3/internal/risk"
 )
 
 // system is the whole application running in-process for one test, in its
@@ -36,13 +37,17 @@ type system struct {
 	ns   kafka.Namespace
 	opts sysOpts
 
-	orchDB, invDB, payDB *pgxpool.Pool
-	svc                  *orchestrator.Service
-	api                  *httptest.Server
+	orchDB, invDB, payDB, riskDB *pgxpool.Pool
+	svc                          *orchestrator.Service
+	api                          *httptest.Server
 }
 
 type sysOpts struct {
 	paymentLimit     int64
+	riskCfg          risk.Config
+	riskFaults       faults.Config
+	riskWorkers      int
+	noRisk           bool
 	inventoryFaults  faults.Config
 	paymentFaults    faults.Config
 	inventoryWorkers int // 0 with noInventory: start them later with addInventoryWorker
@@ -50,14 +55,18 @@ type sysOpts struct {
 	noPayment        bool
 	noSweeper        bool // tests that drive Sweeper.SweepOnce themselves
 	stepTimeout      time.Duration
+	reviewTimeout    time.Duration
 	retry            retry.Policy
 }
 
 func defaultOpts() sysOpts {
 	return sysOpts{
 		paymentLimit:     100_000,
+		riskCfg:          risk.Config{ReviewLimitCents: 1 << 40, ReviewScore: 30, BlockScore: 70},
+		riskWorkers:      1,
 		inventoryWorkers: 1,
 		stepTimeout:      30 * time.Second,
+		reviewTimeout:    time.Minute,
 		retry:            retry.Policy{MaxAttempts: 5, Initial: 20 * time.Millisecond, Max: 200 * time.Millisecond, Multiplier: 2},
 	}
 }
@@ -68,6 +77,7 @@ func startSystem(t *testing.T, opts sysOpts) *system {
 	s.orchDB = env.FreshDB(t, "orchestrator")
 	s.invDB = env.FreshDB(t, "inventory")
 	s.payDB = env.FreshDB(t, "payment")
+	s.riskDB = env.FreshDB(t, "risk")
 
 	cl, err := kafka.NewClient(env.Brokers, "it-admin")
 	if err != nil {
@@ -82,6 +92,7 @@ func startSystem(t *testing.T, opts sysOpts) *system {
 	s.startRelay(s.orchDB, "relay-orch")
 	s.startRelay(s.invDB, "relay-inv")
 	s.startRelay(s.payDB, "relay-pay")
+	s.startRelay(s.riskDB, "relay-risk")
 
 	// Workers.
 	s.svc, err = orchestrator.NewService(s.orchDB, env.Log)
@@ -92,6 +103,11 @@ func startSystem(t *testing.T, opts sysOpts) *system {
 	if !opts.noSweeper {
 		s.startSweeper()
 	}
+	if !opts.noRisk {
+		for range max(1, opts.riskWorkers) {
+			s.addRiskWorker()
+		}
+	}
 	if !opts.noInventory {
 		for range max(1, opts.inventoryWorkers) {
 			s.addInventoryWorker()
@@ -101,7 +117,7 @@ func startSystem(t *testing.T, opts sysOpts) *system {
 		s.addPaymentWorker()
 	}
 
-	s.api = httptest.NewServer(orchestrator.NewHTTPHandler(s.svc, env.Log))
+	s.api = httptest.NewServer(orchestrator.NewHTTPHandler(s.svc, testCards(t), env.Log))
 	t.Cleanup(s.api.Close)
 	return s
 }
@@ -120,7 +136,8 @@ func (s *system) startWorker(service, logicalTopic string, pool *pgxpool.Pool, h
 
 // startSweeper runs the saga timeout sweeper like orchestrator-worker does.
 func (s *system) startSweeper() {
-	sw := orchestrator.NewSweeper(s.orchDB, s.svc, s.opts.stepTimeout, 200*time.Millisecond, 100, env.Log)
+	sw := orchestrator.NewSweeper(s.orchDB, s.svc,
+		orchestrator.Timeouts{Step: s.opts.stepTimeout, Review: s.opts.reviewTimeout}, 200*time.Millisecond, 100, env.Log)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
@@ -140,10 +157,54 @@ func (s *system) addInventoryWorker() *runningConsumer {
 	return s.startWorker("inventory", messaging.TopicInventoryCommands, s.invDB, inv.Handle)
 }
 
-// placeOrder POSTs an order; traceparent may be "" (no incoming trace).
+func (s *system) addRiskWorker() *runningConsumer {
+	svc, err := risk.NewService(s.opts.riskCfg, s.opts.riskFaults, env.Log)
+	if err != nil {
+		s.t.Fatal(err)
+	}
+	return s.startWorker("risk", messaging.TopicRiskCommands, s.riskDB, svc.Handle)
+}
+
+// buyer is who places an order, as the risk service sees it.
+type buyer struct {
+	customer, card, ip, country string
+}
+
+// newBuyer is a customer with no history: risk rules never fire for its first order.
+func newBuyer() buyer {
+	n := uuid.New()
+	return buyer{
+		customer: "cus_" + n.String()[:12],
+		card:     fmt.Sprintf("4%07d%08d", n.ID()%10_000_000, uint32(n[4])<<16|uint32(n[5])<<8|uint32(n[6])),
+		ip:       fmt.Sprintf("10.%d.%d.%d", n[0], n[1], n[2]),
+		country:  "UA",
+	}
+}
+
+func testCards(t *testing.T) orchestrator.CardHasher {
+	t.Helper()
+	c, err := orchestrator.NewCardHasher([]byte("integration-test-card-hash-key-0123456789"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+func orderJSON(seat int, amountCents int64, b buyer) []byte {
+	body, _ := json.Marshal(map[string]any{"seat_id": seat, "amount_cents": amountCents,
+		"customer_id": b.customer, "card_number": b.card, "ip_address": b.ip, "country": b.country})
+	return body
+}
+
+// placeOrder POSTs an order from a new buyer; traceparent may be "" (no incoming trace).
 func (s *system) placeOrder(seat int, amountCents int64, traceparent string) orchestrator.Order {
 	s.t.Helper()
-	body, _ := json.Marshal(map[string]any{"seat_id": seat, "amount_cents": amountCents})
+	return s.placeOrderAs(newBuyer(), seat, amountCents, traceparent)
+}
+
+func (s *system) placeOrderAs(b buyer, seat int, amountCents int64, traceparent string) orchestrator.Order {
+	s.t.Helper()
+	body := orderJSON(seat, amountCents, b)
 	req, err := http.NewRequestWithContext(s.t.Context(), http.MethodPost, s.api.URL+"/orders", bytes.NewReader(body))
 	if err != nil {
 		s.t.Fatal(err)
@@ -201,7 +262,7 @@ func (s *system) dlqCount(logicalTopic string) int {
 
 func (s *system) assertNoDLQ() {
 	s.t.Helper()
-	for _, topic := range []string{messaging.TopicInventoryCommands, messaging.TopicPaymentCommands, messaging.TopicOrchestratorReplies} {
+	for _, topic := range []string{messaging.TopicRiskCommands, messaging.TopicInventoryCommands, messaging.TopicPaymentCommands, messaging.TopicOrchestratorReplies} {
 		if n := s.dlqCount(topic); n != 0 {
 			s.t.Errorf("%s DLQ has %d records", topic, n)
 		}

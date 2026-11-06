@@ -36,7 +36,12 @@ export default function () {
   // A distinct seat per iteration: every order can succeed, so failures in
   // the results mean the system failed, not the test data.
   const seat = OFFSET + exec.scenario.iterationInTest;
-  const res = http.post(`${BASE}/orders`, JSON.stringify({ seat_id: seat, amount_cents: 1000 }), {
+  const n = String(seat).padStart(15, "0");
+  const body = {
+    seat_id: seat, amount_cents: 1000, customer_id: `load-${seat}`, card_number: `4${n}`,
+    ip_address: `10.${(seat >> 16) & 255}.${(seat >> 8) & 255}.${seat & 255}`, country: "UA",
+  };
+  const res = http.post(`${BASE}/orders`, JSON.stringify(body), {
     headers: { 'Content-Type': 'application/json', 'Idempotency-Key': `load-${OFFSET}-${seat}` },
   });
   check(res, { 'accepted (202)': (r) => r.status === 202 });

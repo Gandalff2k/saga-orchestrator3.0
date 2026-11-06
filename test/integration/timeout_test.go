@@ -148,6 +148,9 @@ func TestSweeper_ConcurrentSweepersHandleEachSagaOnce(t *testing.T) {
 	for i := range 30 {
 		ids = append(ids, s.placeOrder(500+i, 10_00, "").ID)
 	}
+	for _, id := range ids {
+		s.waitState(id, orchestrator.StateReserving, 20*time.Second)
+	}
 	time.Sleep(400 * time.Millisecond) // all deadlines passed
 
 	var (
@@ -156,7 +159,7 @@ func TestSweeper_ConcurrentSweepersHandleEachSagaOnce(t *testing.T) {
 		total int
 	)
 	for range 3 {
-		sw := orchestrator.NewSweeper(s.orchDB, s.svc, opts.stepTimeout, time.Hour, 10, env.Log)
+		sw := orchestrator.NewSweeper(s.orchDB, s.svc, orchestrator.Timeouts{Step: opts.stepTimeout}, time.Hour, 10, env.Log)
 		wg.Go(func() {
 			for {
 				n, err := sw.SweepOnce(t.Context())

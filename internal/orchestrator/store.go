@@ -16,11 +16,13 @@ type row interface {
 
 func insertOrder(ctx context.Context, tx pgx.Tx, id uuid.UUID, in PlaceOrder) (createdAt time.Time, inserted bool, err error) {
 	err = tx.QueryRow(ctx,
-		`INSERT INTO orders (order_id, idempotency_key, seat_id, amount_cents, status)
-		 VALUES ($1, $2, $3, $4, $5)
+		`INSERT INTO orders (order_id, idempotency_key, seat_id, amount_cents, status,
+		                     customer_id, card_hash, ip, country)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		 ON CONFLICT (idempotency_key) DO NOTHING
 		 RETURNING created_at`,
 		id, nullIfEmpty(in.IdempotencyKey), in.SeatID, in.AmountCents, OrderPending,
+		in.CustomerID, in.CardHash, in.IP, in.Country,
 	).Scan(&createdAt)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
@@ -43,8 +45,9 @@ func insertSaga(ctx context.Context, tx pgx.Tx, s Saga) error {
 }
 
 const selectOrder = `
-	SELECT o.order_id, s.saga_id, o.seat_id, o.amount_cents, o.status, s.state,
-	       COALESCE(o.failure_reason, ''), o.created_at
+	SELECT o.order_id, s.saga_id, o.seat_id, o.amount_cents,
+	       COALESCE(o.customer_id, ''), COALESCE(o.country, ''), COALESCE(o.card_hash, ''), COALESCE(o.ip, ''),
+	       o.status, s.state, COALESCE(o.failure_reason, ''), o.created_at
 	FROM orders o
 	JOIN sagas s ON s.order_id = o.order_id`
 
@@ -58,7 +61,8 @@ func orderByIdempotencyKey(ctx context.Context, q row, key string) (Order, error
 
 func scanOrder(r pgx.Row) (Order, error) {
 	var o Order
-	err := r.Scan(&o.ID, &o.SagaID, &o.SeatID, &o.AmountCents, &o.Status, &o.SagaState, &o.FailureReason, &o.CreatedAt)
+	err := r.Scan(&o.ID, &o.SagaID, &o.SeatID, &o.AmountCents, &o.CustomerID, &o.Country, &o.CardHash, &o.IP,
+		&o.Status, &o.SagaState, &o.FailureReason, &o.CreatedAt)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		return Order{}, ErrNotFound
@@ -86,15 +90,16 @@ func sagaForUpdate(ctx context.Context, tx pgx.Tx, id uuid.UUID) (Saga, time.Tim
 	return s, started, nil
 }
 
-func overdueForUpdate(ctx context.Context, tx pgx.Tx, timeout time.Duration, limit int) ([]Saga, []time.Time, error) {
+func overdueForUpdate(ctx context.Context, tx pgx.Tx, step, review time.Duration, limit int) ([]Saga, []time.Time, error) {
 	rows, err := tx.Query(ctx,
 		`SELECT saga_id, order_id, state, seat_id, amount_cents, created_at
 		 FROM sagas
 		 WHERE state NOT IN ('COMPLETED', 'ABORTED')
 		   AND updated_at < now() - make_interval(secs => $1)
+		   AND (state <> 'IN_REVIEW' OR updated_at < now() - make_interval(secs => $2))
 		 ORDER BY updated_at
-		 LIMIT $2
-		 FOR UPDATE SKIP LOCKED`, timeout.Seconds(), limit)
+		 LIMIT $3
+		 FOR UPDATE SKIP LOCKED`, step.Seconds(), review.Seconds(), limit)
 	if err != nil {
 		return nil, nil, fmt.Errorf("select overdue sagas: %w", err)
 	}

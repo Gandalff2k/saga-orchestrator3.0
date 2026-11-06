@@ -35,6 +35,26 @@ func (f *fakeService) GetOrder(_ context.Context, id uuid.UUID) (Order, error) {
 	return f.order, nil
 }
 
+var testKey = []byte("0123456789abcdef0123456789abcdef")
+
+func testHandler(t *testing.T, svc OrderService) http.Handler {
+	t.Helper()
+	cards, err := NewCardHasher(testKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return NewHTTPHandler(svc, cards, slog.New(slog.NewTextHandler(io.Discard, nil)))
+}
+
+func orderBody(override string) string {
+	base := `"seat_id":1,"amount_cents":100,"customer_id":"cus_1","card_number":"4242424242424242",` +
+		`"ip_address":"203.0.113.7","country":"UA"`
+	if override == "" {
+		return "{" + base + "}"
+	}
+	return "{" + base + "," + override + "}"
+}
+
 func TestHTTP_PlaceOrder(t *testing.T) {
 	order := Order{ID: uuid.New(), Status: OrderPending}
 
@@ -44,18 +64,23 @@ func TestHTTP_PlaceOrder(t *testing.T) {
 		svc        *fakeService
 		wantStatus int
 	}{
-		{"created", `{"seat_id":1,"amount_cents":100}`, &fakeService{order: order, created: true}, http.StatusAccepted},
-		{"idempotent replay", `{"seat_id":1,"amount_cents":100}`, &fakeService{order: order, created: false}, http.StatusOK},
+		{"created", orderBody(""), &fakeService{order: order, created: true}, http.StatusAccepted},
+		{"idempotent replay", orderBody(""), &fakeService{order: order, created: false}, http.StatusOK},
 		{"bad json", `{`, &fakeService{}, http.StatusBadRequest},
-		{"unknown field", `{"seat_id":1,"amount_cents":100,"x":1}`, &fakeService{}, http.StatusBadRequest},
-		{"invalid seat", `{"seat_id":0,"amount_cents":100}`, &fakeService{}, http.StatusBadRequest},
-		{"invalid amount", `{"seat_id":1,"amount_cents":-5}`, &fakeService{}, http.StatusBadRequest},
-		{"key reused with another body", `{"seat_id":1,"amount_cents":100}`, &fakeService{err: ErrIdempotencyKeyReused}, http.StatusUnprocessableEntity},
-		{"internal error hidden", `{"seat_id":1,"amount_cents":100}`, &fakeService{err: errors.New("db password leaked")}, http.StatusInternalServerError},
+		{"unknown field", orderBody(`"x":1`), &fakeService{}, http.StatusBadRequest},
+		{"invalid seat", `{"seat_id":0,"amount_cents":100,"customer_id":"c","card_number":"4242424242424242","ip_address":"1.2.3.4","country":"UA"}`, &fakeService{}, http.StatusBadRequest},
+		{"invalid amount", `{"seat_id":1,"amount_cents":-5,"customer_id":"c","card_number":"4242424242424242","ip_address":"1.2.3.4","country":"UA"}`, &fakeService{}, http.StatusBadRequest},
+		{"card with letters", `{"seat_id":1,"amount_cents":100,"customer_id":"c","card_number":"4242abcd42424242","ip_address":"1.2.3.4","country":"UA"}`, &fakeService{}, http.StatusBadRequest},
+		{"card too short", `{"seat_id":1,"amount_cents":100,"customer_id":"c","card_number":"4242","ip_address":"1.2.3.4","country":"UA"}`, &fakeService{}, http.StatusBadRequest},
+		{"bad ip", `{"seat_id":1,"amount_cents":100,"customer_id":"c","card_number":"4242424242424242","ip_address":"999.1.1.1","country":"UA"}`, &fakeService{}, http.StatusBadRequest},
+		{"bad country", `{"seat_id":1,"amount_cents":100,"customer_id":"c","card_number":"4242424242424242","ip_address":"1.2.3.4","country":"ukr"}`, &fakeService{}, http.StatusBadRequest},
+		{"no customer", `{"seat_id":1,"amount_cents":100,"card_number":"4242424242424242","ip_address":"1.2.3.4","country":"UA"}`, &fakeService{}, http.StatusBadRequest},
+		{"key reused with another body", orderBody(""), &fakeService{err: ErrIdempotencyKeyReused}, http.StatusUnprocessableEntity},
+		{"internal error hidden", orderBody(""), &fakeService{err: errors.New("db password leaked")}, http.StatusInternalServerError},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := NewHTTPHandler(tt.svc, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			h := testHandler(t, tt.svc)
 			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/orders", strings.NewReader(tt.body))
 			req.Header.Set("Idempotency-Key", "k-1")
 			rec := httptest.NewRecorder()
@@ -71,6 +96,9 @@ func TestHTTP_PlaceOrder(t *testing.T) {
 			if tt.wantStatus == http.StatusAccepted {
 				if tt.svc.placeIn.IdempotencyKey != "k-1" {
 					t.Errorf("idempotency key not forwarded: %q", tt.svc.placeIn.IdempotencyKey)
+				}
+				if h := tt.svc.placeIn.CardHash; len(h) != 64 || strings.Contains(h, "4242") {
+					t.Errorf("card must reach the service only as an HMAC, got %q", h)
 				}
 				if loc := rec.Header().Get("Location"); loc != "/orders/"+order.ID.String() {
 					t.Errorf("Location = %q", loc)
@@ -93,7 +121,7 @@ func TestHTTP_GetOrder(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h := NewHTTPHandler(tt.svc, slog.New(slog.NewTextHandler(io.Discard, nil)))
+			h := testHandler(t, tt.svc)
 			rec := httptest.NewRecorder()
 			h.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, tt.path, nil))
 			if rec.Code != tt.wantStatus {

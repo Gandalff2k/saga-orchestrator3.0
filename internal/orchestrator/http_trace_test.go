@@ -1,8 +1,6 @@
 package orchestrator
 
 import (
-	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -19,7 +17,7 @@ func TestHTTP_SpanNamedByRoute(t *testing.T) {
 	otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rec)))
 	t.Cleanup(func() { otel.SetTracerProvider(prev) })
 
-	h := NewHTTPHandler(&fakeService{order: Order{ID: uuid.New()}}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	h := testHandler(t, &fakeService{order: Order{ID: uuid.New()}})
 
 	for _, tc := range []struct{ method, path, want string }{
 		{http.MethodGet, "/orders/" + uuid.NewString(), "GET /orders/{id}"},

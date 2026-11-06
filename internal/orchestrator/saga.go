@@ -12,6 +12,8 @@ type State string
 
 // Saga states; COMPLETED and ABORTED are terminal.
 const (
+	StateScoring      State = "SCORING"
+	StateInReview     State = "IN_REVIEW"
 	StateReserving    State = "RESERVING"
 	StateCharging     State = "CHARGING"
 	StateRefunding    State = "REFUNDING"
@@ -35,6 +37,8 @@ const (
 
 // Abort reasons written by the timeout sweeper.
 const (
+	ReasonRiskTimeout      = "timed out waiting for the risk check"
+	ReasonReviewTimeout    = "manual review not finished in time"
 	ReasonInventoryTimeout = "timed out waiting for inventory"
 	ReasonPaymentTimeout   = "timed out waiting for payment"
 )
@@ -64,19 +68,25 @@ type Transition struct {
 	Ignored bool
 }
 
-// Start returns a new saga in RESERVING and the first command to send.
-func Start(sagaID, orderID uuid.UUID, seatID int, amountCents int64) (Saga, Outgoing) {
-	s := Saga{ID: sagaID, OrderID: orderID, State: StateReserving, SeatID: seatID, AmountCents: amountCents}
-	return s, Outgoing{
-		Topic:   messaging.TopicInventoryCommands,
-		Type:    messaging.CmdReserveSeat,
-		Payload: messaging.ReserveSeat{SeatID: seatID},
-	}
+// Start returns a new saga in SCORING and the risk check to send.
+func Start(sagaID, orderID uuid.UUID, seatID int, score messaging.Score) (Saga, Outgoing) {
+	s := Saga{ID: sagaID, OrderID: orderID, State: StateScoring, SeatID: seatID, AmountCents: score.AmountCents}
+	return s, Outgoing{Topic: messaging.TopicRiskCommands, Type: messaging.CmdScore, Payload: score}
 }
 
 // On computes the transition for a reply of the given message type.
 func (s Saga) On(replyType string) Transition {
+	waitingForRisk := s.State == StateScoring || s.State == StateInReview
 	switch {
+	case waitingForRisk && replyType == messaging.EvtRiskApproved:
+		return Transition{Next: StateReserving, Emit: []Outgoing{s.reserve()}}
+
+	case waitingForRisk && replyType == messaging.EvtRiskRejected:
+		return Transition{Next: StateAborted, Order: OrderAborted}
+
+	case s.State == StateScoring && replyType == messaging.EvtRiskReviewRequired:
+		return Transition{Next: StateInReview}
+
 	case s.State == StateReserving && replyType == messaging.EvtSeatReserved:
 		return Transition{Next: StateCharging, Emit: []Outgoing{s.charge()}}
 
@@ -104,6 +114,10 @@ func (s Saga) On(replyType string) Transition {
 // OnTimeout computes what to do when the saga waited too long for a reply.
 func (s Saga) OnTimeout() Transition {
 	switch s.State {
+	case StateScoring:
+		return Transition{Next: StateAborted, Order: OrderAborted, Reason: ReasonRiskTimeout, Emit: []Outgoing{s.cancelReview()}}
+	case StateInReview:
+		return Transition{Next: StateAborted, Order: OrderAborted, Reason: ReasonReviewTimeout, Emit: []Outgoing{s.cancelReview()}}
 	case StateReserving:
 		return Transition{Next: StateCompensating, Reason: ReasonInventoryTimeout, Emit: []Outgoing{s.release()}}
 	case StateCharging:
@@ -114,6 +128,16 @@ func (s Saga) OnTimeout() Transition {
 		return Transition{Next: StateCompensating, Emit: []Outgoing{s.release()}} // re-send; release is idempotent
 	}
 	return Transition{Next: s.State, Ignored: true}
+}
+
+func (s Saga) reserve() Outgoing {
+	return Outgoing{Topic: messaging.TopicInventoryCommands, Type: messaging.CmdReserveSeat,
+		Payload: messaging.ReserveSeat{SeatID: s.SeatID}}
+}
+
+func (s Saga) cancelReview() Outgoing {
+	return Outgoing{Topic: messaging.TopicRiskCommands, Type: messaging.CmdCancelReview,
+		Payload: messaging.CancelReview{}}
 }
 
 func (s Saga) charge() Outgoing {

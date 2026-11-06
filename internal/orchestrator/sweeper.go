@@ -15,15 +15,22 @@ import (
 type Sweeper struct {
 	pool     *pgxpool.Pool
 	svc      *Service
-	timeout  time.Duration
+	timeouts Timeouts
 	interval time.Duration
 	batch    int
 	log      *slog.Logger
 }
 
-// NewSweeper builds a Sweeper.
-func NewSweeper(pool *pgxpool.Pool, svc *Service, stepTimeout, interval time.Duration, batch int, log *slog.Logger) *Sweeper {
-	return &Sweeper{pool: pool, svc: svc, timeout: stepTimeout, interval: interval, batch: max(1, batch), log: log}
+// Timeouts are how long a saga may stay in one state: Review for IN_REVIEW, Step for the rest.
+type Timeouts struct {
+	Step   time.Duration
+	Review time.Duration
+}
+
+// NewSweeper builds a Sweeper. A review timeout shorter than the step timeout is raised to it.
+func NewSweeper(pool *pgxpool.Pool, svc *Service, t Timeouts, interval time.Duration, batch int, log *slog.Logger) *Sweeper {
+	t.Review = max(t.Review, t.Step)
+	return &Sweeper{pool: pool, svc: svc, timeouts: t, interval: interval, batch: max(1, batch), log: log}
 }
 
 // Run sweeps every interval until ctx is cancelled.
@@ -56,7 +63,7 @@ func (w *Sweeper) Run(ctx context.Context) error {
 func (w *Sweeper) SweepOnce(ctx context.Context) (int, error) {
 	var n int
 	err := postgres.WithTx(ctx, w.pool, func(tx pgx.Tx) error {
-		sagas, started, err := overdueForUpdate(ctx, tx, w.timeout, w.batch)
+		sagas, started, err := overdueForUpdate(ctx, tx, w.timeouts.Step, w.timeouts.Review, w.batch)
 		if err != nil {
 			return err
 		}

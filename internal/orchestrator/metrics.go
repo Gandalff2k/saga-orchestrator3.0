@@ -60,7 +60,7 @@ func (m *sagaMetrics) ignored(ctx context.Context, replyType string) {
 }
 
 func (m *sagaMetrics) zeroTimeouts(ctx context.Context) {
-	for _, s := range []State{StateReserving, StateCharging, StateRefunding, StateCompensating} {
+	for _, s := range []State{StateScoring, StateInReview, StateReserving, StateCharging, StateRefunding, StateCompensating} {
 		m.timeouts.Add(ctx, 0, metric.WithAttributes(attribute.String("state", string(s))))
 	}
 }

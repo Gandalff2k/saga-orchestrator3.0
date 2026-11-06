@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/netip"
+	"regexp"
 	"time"
 
 	"github.com/google/uuid"
@@ -31,6 +33,10 @@ type Order struct {
 	SagaID        uuid.UUID   `json:"saga_id"`
 	SeatID        int         `json:"seat_id"`
 	AmountCents   int64       `json:"amount_cents"`
+	CustomerID    string      `json:"customer_id"`
+	Country       string      `json:"country"`
+	CardHash      string      `json:"-"`
+	IP            string      `json:"-"`
 	Status        OrderStatus `json:"status"`
 	SagaState     State       `json:"saga_state"`
 	FailureReason string      `json:"failure_reason,omitempty"`
@@ -41,8 +47,14 @@ type Order struct {
 type PlaceOrder struct {
 	SeatID         int
 	AmountCents    int64
+	CustomerID     string
+	CardHash       string
+	IP             string
+	Country        string
 	IdempotencyKey string
 }
+
+var countryCode = regexp.MustCompile(`^[A-Z]{2}$`)
 
 // Validate rejects input that must never reach the database.
 func (p PlaceOrder) Validate() error {
@@ -51,10 +63,29 @@ func (p PlaceOrder) Validate() error {
 		return fmt.Errorf("%w: seat_id must be positive", ErrInvalidInput)
 	case p.AmountCents <= 0:
 		return fmt.Errorf("%w: amount_cents must be positive", ErrInvalidInput)
+	case p.CustomerID == "" || len(p.CustomerID) > 64:
+		return fmt.Errorf("%w: customer_id must be 1-64 characters", ErrInvalidInput)
+	case p.CardHash == "":
+		return fmt.Errorf("%w: card is required", ErrInvalidInput)
+	case !countryCode.MatchString(p.Country):
+		return fmt.Errorf("%w: country must be an ISO 3166 alpha-2 code", ErrInvalidInput)
 	case len(p.IdempotencyKey) > 128:
 		return fmt.Errorf("%w: idempotency key too long", ErrInvalidInput)
 	}
+	if _, err := netip.ParseAddr(p.IP); err != nil {
+		return fmt.Errorf("%w: ip_address is not a valid IP", ErrInvalidInput)
+	}
 	return nil
+}
+
+func (p PlaceOrder) score() messaging.Score {
+	return messaging.Score{CustomerID: p.CustomerID, CardHash: p.CardHash, IP: p.IP, Country: p.Country,
+		AmountCents: p.AmountCents}
+}
+
+func (p PlaceOrder) sameAs(o Order) bool {
+	return o.SeatID == p.SeatID && o.AmountCents == p.AmountCents && o.CustomerID == p.CustomerID &&
+		o.CardHash == p.CardHash && o.IP == p.IP && o.Country == p.Country
 }
 
 // Service holds the orchestrator use cases: PlaceOrder and GetOrder for the API, HandleReply for the worker.
@@ -101,7 +132,7 @@ func (s *Service) PlaceOrder(ctx context.Context, in PlaceOrder) (Order, bool, e
 			return err
 		}
 
-		saga, cmd := Start(sagaID, orderID, in.SeatID, in.AmountCents)
+		saga, cmd := Start(sagaID, orderID, in.SeatID, in.score())
 		if err := insertSaga(ctx, tx, saga); err != nil {
 			return err
 		}
@@ -115,6 +146,7 @@ func (s *Service) PlaceOrder(ctx context.Context, in PlaceOrder) (Order, bool, e
 
 		order = Order{
 			ID: orderID, SagaID: sagaID, SeatID: in.SeatID, AmountCents: in.AmountCents,
+			CustomerID: in.CustomerID, Country: in.Country, CardHash: in.CardHash, IP: in.IP,
 			Status: OrderPending, SagaState: saga.State, CreatedAt: createdAt,
 		}
 		created = true
@@ -135,7 +167,7 @@ func replay(ctx context.Context, tx pgx.Tx, in PlaceOrder) (Order, error) {
 	if err != nil {
 		return Order{}, err
 	}
-	if existing.SeatID != in.SeatID || existing.AmountCents != in.AmountCents {
+	if !in.sameAs(existing) {
 		return Order{}, fmt.Errorf("%w: key %q", ErrIdempotencyKeyReused, in.IdempotencyKey)
 	}
 	return existing, nil
