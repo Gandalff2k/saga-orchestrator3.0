@@ -4,6 +4,10 @@
 //	sagactl topics             create Kafka topics + DLQs (KAFKA_BROKERS, TOPIC_*)
 //	sagactl dlq list   -topic inventory.commands.dlq [-limit N] [-json]
 //	sagactl dlq replay -topic inventory.commands.dlq [-limit N] [-dry-run]
+//	sagactl review list    [-status PENDING] [-limit N] [-json]          (RISK_DSN)
+//	sagactl review show    <saga_id>
+//	sagactl review approve <saga_id> -by <reviewer> [-note text]
+//	sagactl review reject  <saga_id> -by <reviewer> [-note text]
 package main
 
 import (
@@ -55,6 +59,8 @@ func run() int {
 		err = topics(ctx, log)
 	case "dlq":
 		err = dlq(ctx, args, log)
+	case "review":
+		err = review(ctx, args, os.Stdout)
 	default:
 		usage()
 		return 2
@@ -67,7 +73,7 @@ func run() int {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: sagactl migrate | topics | dlq {list|replay} -topic <name.dlq>")
+	fmt.Fprintln(os.Stderr, "usage: sagactl migrate | topics | dlq {list|replay} -topic <name.dlq> | review {list|show|approve|reject}")
 }
 
 func migrate(ctx context.Context, log *slog.Logger) error {
@@ -98,7 +104,7 @@ func migrate(ctx context.Context, log *slog.Logger) error {
 		ran++
 	}
 	if ran == 0 {
-		return errors.New("no <SERVICE>_DSN set (ORCHESTRATOR_DSN, INVENTORY_DSN, PAYMENT_DSN)")
+		return errors.New("no <SERVICE>_DSN set (ORCHESTRATOR_DSN, INVENTORY_DSN, PAYMENT_DSN, RISK_DSN)")
 	}
 	return nil
 }
