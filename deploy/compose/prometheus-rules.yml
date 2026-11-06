@@ -20,6 +20,7 @@ groups:
           absent_over_time(outbox_relay_owned_shards{service_name="outbox-relay-orchestrator"}[2m])
           or absent_over_time(outbox_relay_owned_shards{service_name="outbox-relay-inventory"}[2m])
           or absent_over_time(outbox_relay_owned_shards{service_name="outbox-relay-payment"}[2m])
+          or absent_over_time(outbox_relay_owned_shards{service_name="outbox-relay-risk"}[2m])
         for: 30s
         labels: { severity: page }
         annotations:
@@ -49,3 +50,10 @@ groups:
         labels: { severity: ticket }
         annotations:
           summary: "p95 saga duration is {{ $value | humanizeDuration }}"
+
+      - alert: ReviewQueueAging
+        expr: max(risk_review_oldest_age_seconds) > 1200
+        for: 1m
+        labels: { severity: page }
+        annotations:
+          summary: "oldest review case is {{ $value | humanizeDuration }} old: orders abort at SAGA_REVIEW_TIMEOUT (30m)"

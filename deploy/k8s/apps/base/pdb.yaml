@@ -60,3 +60,12 @@ spec:
   maxUnavailable: 1
   selector:
     matchLabels: { app.kubernetes.io/name: outbox-relay-payment }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: risk-worker
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: risk-worker }

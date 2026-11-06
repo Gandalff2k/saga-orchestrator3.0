@@ -60,3 +60,24 @@ spec:
         topic: orchestrator.replies
         lagThreshold: "200"
         offsetResetPolicy: earliest
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: risk-worker
+spec:
+  scaleTargetRef: { name: risk-worker }
+  minReplicaCount: 2
+  maxReplicaCount: 12
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown: { stabilizationWindowSeconds: 120 }
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: saga-kafka-kafka-bootstrap.saga.svc:9092
+        consumerGroup: risk
+        topic: risk.commands
+        lagThreshold: "200"
+        offsetResetPolicy: earliest

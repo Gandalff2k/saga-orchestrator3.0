@@ -746,6 +746,72 @@
           "mode": "multi"
         }
       }
+    },
+    {
+      "type": "row",
+      "title": "Risk",
+      "id": 20,
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 43 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Risk decisions /s",
+      "id": 21,
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 44 },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "refId": "A",
+          "expr": "sum by (decision) (rate(risk_decisions_total[1m]))",
+          "legendFormat": "{{decision}}"
+        }
+      ],
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Rule hits /s",
+      "id": 22,
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "A rule that suddenly fires much more often is either an attack or a broken rule.",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 44 },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "refId": "A",
+          "expr": "sum by (rule) (rate(risk_rule_hits_total[1m]))",
+          "legendFormat": "{{rule}}"
+        }
+      ],
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Review queue",
+      "id": 23,
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "Past SAGA_REVIEW_TIMEOUT the order aborts on its own: the oldest case must stay well below it.",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 44 },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "refId": "A",
+          "expr": "max(risk_review_oldest_age_seconds)",
+          "legendFormat": "oldest case age (s)"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "refId": "B",
+          "expr": "max(risk_review_pending)",
+          "legendFormat": "pending cases"
+        }
+      ],
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
     }
   ],
   "templating": {

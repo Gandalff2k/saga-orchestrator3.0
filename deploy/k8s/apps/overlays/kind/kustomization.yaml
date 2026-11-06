@@ -11,6 +11,10 @@ secretGenerator:
       - ORCHESTRATOR_DSN=postgres://saga:saga@postgres:5432/orchestrator?sslmode=disable
       - INVENTORY_DSN=postgres://saga:saga@postgres:5432/inventory?sslmode=disable
       - PAYMENT_DSN=postgres://saga:saga@postgres:5432/payment?sslmode=disable
+      - RISK_DSN=postgres://saga:saga@postgres:5432/risk?sslmode=disable
+  - name: saga-secrets
+    literals:
+      - CARD_HASH_KEY=kind-only-card-hash-key-change-me-00001
 
 patches:
   - target: { kind: Deployment }

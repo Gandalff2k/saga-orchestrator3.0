@@ -82,3 +82,62 @@ spec:
           resources:
             requests: { cpu: 100m, memory: 64Mi }
             limits: { memory: 256Mi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: risk-worker
+  labels: { app.kubernetes.io/name: risk-worker }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app.kubernetes.io/name: risk-worker }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: risk-worker }
+    spec:
+      containers:
+        - name: app
+          image: saga3
+          command: [risk-worker]
+          ports: []
+          env:
+            - { name: SERVICE_NAME, value: risk-worker }
+            - { name: CONSUMER_GROUP, value: risk }
+            - { name: CONSUMER_TOPICS, value: risk.commands }
+            - { name: RISK_REVIEW_LIMIT_CENTS, value: "10000" }
+            - name: POSTGRES_DSN
+              valueFrom: { secretKeyRef: { name: saga-db, key: RISK_DSN } }
+          resources:
+            requests: { cpu: 100m, memory: 64Mi }
+            limits: { memory: 256Mi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: risk-agent
+  labels: { app.kubernetes.io/name: risk-agent }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: risk-agent }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: risk-agent }
+    spec:
+      containers:
+        - name: app
+          image: saga3
+          command: [risk-agent]
+          ports: []
+          env:
+            - { name: SERVICE_NAME, value: risk-agent }
+            - { name: LLM_BASE_URL, value: "https://api.groq.com/openai/v1" }
+            - { name: LLM_MODEL, value: openai/gpt-oss-120b }
+            - name: LLM_API_KEY
+              valueFrom: { secretKeyRef: { name: saga-llm, key: LLM_API_KEY, optional: true } }
+            - name: POSTGRES_DSN
+              valueFrom: { secretKeyRef: { name: saga-db, key: RISK_DSN } }
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { memory: 128Mi }

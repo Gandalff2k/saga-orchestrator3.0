@@ -2,3 +2,4 @@
 CREATE DATABASE orchestrator;
 CREATE DATABASE inventory;
 CREATE DATABASE payment;
+CREATE DATABASE risk;

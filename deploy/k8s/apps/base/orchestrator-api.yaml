@@ -19,6 +19,8 @@ spec:
             - { name: http, containerPort: 8080 }
           env:
             - { name: SERVICE_NAME, value: orchestrator-api }
+            - name: CARD_HASH_KEY
+              valueFrom: { secretKeyRef: { name: saga-secrets, key: CARD_HASH_KEY } }
             - name: POSTGRES_DSN
               valueFrom: { secretKeyRef: { name: saga-db, key: ORCHESTRATOR_DSN } }
           resources:

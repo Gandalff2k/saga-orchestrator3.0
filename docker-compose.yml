@@ -2,6 +2,7 @@
 #   docker compose up -d --build                    infra + migrate + topics
 #   docker compose --profile apps up -d --build     + all services
 #   docker compose --profile apps up -d --scale inventory-worker=4
+#   docker compose --profile apps --profile agent up -d   + the LLM review agent (LLM_API_KEY in .env)
 #
 # UIs: API :8080 · Kafka UI :8085 · Jaeger :16686 · Grafana :3000 · Prometheus :9090
 name: saga3
@@ -53,6 +54,7 @@ x-dsn:
   orchestrator: &dsn-orchestrator postgres://saga:saga@postgres:5432/orchestrator?sslmode=disable
   inventory: &dsn-inventory postgres://saga:saga@postgres:5432/inventory?sslmode=disable
   payment: &dsn-payment postgres://saga:saga@postgres:5432/payment?sslmode=disable
+  risk: &dsn-risk postgres://saga:saga@postgres:5432/risk?sslmode=disable
 
 services:
   kafka-1:
@@ -160,6 +162,7 @@ services:
       ORCHESTRATOR_DSN: *dsn-orchestrator
       INVENTORY_DSN: *dsn-inventory
       PAYMENT_DSN: *dsn-payment
+      RISK_DSN: *dsn-risk
     depends_on:
       postgres: { condition: service_healthy }
 
@@ -185,6 +188,7 @@ services:
       <<: *app-env
       SERVICE_NAME: orchestrator-api
       POSTGRES_DSN: *dsn-orchestrator
+      CARD_HASH_KEY: ${CARD_HASH_KEY:-local-only-card-hash-key-change-me-0001}
 
   orchestrator-worker:
     <<: *app
@@ -197,6 +201,7 @@ services:
       POSTGRES_DSN: *dsn-orchestrator
       CONSUMER_GROUP: orchestrator
       CONSUMER_TOPICS: orchestrator.replies
+      SAGA_REVIEW_TIMEOUT: ${SAGA_REVIEW_TIMEOUT:-30m}
 
   inventory-worker:
     <<: *app
@@ -224,6 +229,20 @@ services:
       CONSUMER_TOPICS: payment.commands
       PAYMENT_LIMIT_CENTS: 100000
       FAULT_TRANSIENT_RATE: ${PAYMENT_FAULT_TRANSIENT_RATE:-0}
+
+  risk-worker:
+    <<: *app
+    profiles: [apps]
+    command: ["risk-worker"]
+    deploy: { replicas: 2 }
+    environment:
+      <<: *app-env
+      SERVICE_NAME: risk-worker
+      POSTGRES_DSN: *dsn-risk
+      CONSUMER_GROUP: risk
+      CONSUMER_TOPICS: risk.commands
+      RISK_REVIEW_LIMIT_CENTS: ${RISK_REVIEW_LIMIT_CENTS:-10000}
+      FAULT_TRANSIENT_RATE: ${RISK_FAULT_TRANSIENT_RATE:-0}
 
   outbox-relay-orchestrator:
     <<: *app
@@ -257,6 +276,29 @@ services:
       SERVICE_NAME: outbox-relay-payment
       RELAY_POLL_INTERVAL: ${RELAY_POLL_INTERVAL:-200ms}
       POSTGRES_DSN: *dsn-payment
+
+  outbox-relay-risk:
+    <<: *app
+    profiles: [apps]
+    command: ["outbox-relay"]
+    deploy: { replicas: 2 }
+    environment:
+      <<: *app-env
+      SERVICE_NAME: outbox-relay-risk
+      RELAY_POLL_INTERVAL: ${RELAY_POLL_INTERVAL:-200ms}
+      POSTGRES_DSN: *dsn-risk
+
+  risk-agent:
+    <<: *app
+    profiles: [agent]
+    command: ["risk-agent"]
+    environment:
+      <<: *app-env
+      SERVICE_NAME: risk-agent
+      POSTGRES_DSN: *dsn-risk
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.groq.com/openai/v1}
+      LLM_MODEL: ${LLM_MODEL:-openai/gpt-oss-120b}
+      LLM_API_KEY: ${LLM_API_KEY:-}
 
 volumes:
   pg-data:

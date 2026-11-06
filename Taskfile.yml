@@ -119,6 +119,7 @@ tasks:
   k8s-apps:
     desc: jobs + services (+ KEDA lag autoscaling)
     cmds:
+      - kubectl -n saga create secret generic saga-llm --from-literal=LLM_API_KEY="${LLM_API_KEY:-}" --dry-run=client -o yaml | kubectl apply -f -
       - kubectl apply -k deploy/k8s/apps/overlays/kind
       - kubectl apply -n saga -f deploy/k8s/keda/scaledobjects.yaml
 
