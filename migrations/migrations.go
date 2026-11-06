@@ -13,11 +13,11 @@ import (
 	"github.com/pressly/goose/v3/database"
 )
 
-//go:embed platform/*.sql orchestrator/*.sql inventory/*.sql payment/*.sql
+//go:embed platform/*.sql orchestrator/*.sql inventory/*.sql payment/*.sql risk/*.sql
 var files embed.FS
 
 // Services that own a database.
-var Services = []string{"orchestrator", "inventory", "payment"}
+var Services = []string{"orchestrator", "inventory", "payment", "risk"}
 
 // Up applies platform and service migrations to db.
 func Up(ctx context.Context, db *sql.DB, service string, log *slog.Logger) error {
