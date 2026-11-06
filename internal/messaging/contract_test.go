@@ -12,6 +12,12 @@ import (
 var update = flag.Bool("update", false, "rewrite testdata/*.json golden files")
 
 var contract = map[string]any{
+	CmdScore: Score{CustomerID: "cus_42", CardHash: "9f2c1e", IP: "203.0.113.7", Country: "UA",
+		AmountCents: 12_345},
+	CmdCancelReview:          CancelReview{},
+	EvtRiskApproved:          Reply{},
+	EvtRiskRejected:          Reply{Reason: "blocked by risk rules: card_testing"},
+	EvtRiskReviewRequired:    Reply{},
 	CmdReserveSeat:           ReserveSeat{SeatID: 12},
 	CmdReleaseSeat:           ReleaseSeat{SeatID: 12},
 	CmdCharge:                Charge{AmountCents: 12_345},
@@ -59,7 +65,8 @@ func TestContract_UnknownFieldsAreIgnored(t *testing.T) {
 var versioned = regexp.MustCompile(`^[a-z]+\.[a-z_]+\.v[0-9]+$`)
 
 func TestContract_AllTypesCovered(t *testing.T) {
-	all := []string{CmdReserveSeat, CmdReleaseSeat, CmdCharge, CmdRefund,
+	all := []string{CmdScore, CmdCancelReview, EvtRiskApproved, EvtRiskRejected, EvtRiskReviewRequired,
+		CmdReserveSeat, CmdReleaseSeat, CmdCharge, CmdRefund,
 		EvtSeatReserved, EvtSeatReservationFailed, EvtSeatReleased,
 		EvtPaymentCharged, EvtPaymentFailed, EvtPaymentRefunded}
 	seen := map[string]bool{}

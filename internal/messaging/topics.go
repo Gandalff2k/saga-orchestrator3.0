@@ -8,6 +8,7 @@ import (
 
 // Logical topic names; kafka.Namespace adds the environment prefix.
 const (
+	TopicRiskCommands        = "risk.commands"
 	TopicInventoryCommands   = "inventory.commands"
 	TopicPaymentCommands     = "payment.commands"
 	TopicOrchestratorReplies = "orchestrator.replies"
@@ -29,7 +30,7 @@ func Topics(partitions int32, replicationFactor int16) []kafka.TopicSpec {
 	}
 
 	var out []kafka.TopicSpec
-	for _, name := range []string{TopicInventoryCommands, TopicPaymentCommands, TopicOrchestratorReplies} {
+	for _, name := range []string{TopicRiskCommands, TopicInventoryCommands, TopicPaymentCommands, TopicOrchestratorReplies} {
 		out = append(out,
 			kafka.TopicSpec{Name: name, Partitions: partitions, ReplicationFactor: replicationFactor, Configs: main},
 			kafka.TopicSpec{Name: kafka.DLQTopic(name), Partitions: partitions, ReplicationFactor: replicationFactor, Configs: dlq},

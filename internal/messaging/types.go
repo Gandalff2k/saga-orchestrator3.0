@@ -9,14 +9,19 @@ import (
 
 // Commands: orchestrator -> participant.
 const (
-	CmdReserveSeat = "inventory.reserve_seat.v1"
-	CmdReleaseSeat = "inventory.release_seat.v1"
-	CmdCharge      = "payment.charge.v1"
-	CmdRefund      = "payment.refund.v1" // compensation for CmdCharge (sent on timeout)
+	CmdScore        = "risk.score.v1"
+	CmdCancelReview = "risk.cancel_review.v1"
+	CmdReserveSeat  = "inventory.reserve_seat.v1"
+	CmdReleaseSeat  = "inventory.release_seat.v1"
+	CmdCharge       = "payment.charge.v1"
+	CmdRefund       = "payment.refund.v1" // compensation for CmdCharge (sent on timeout)
 )
 
 // Replies: participant -> orchestrator (all on TopicOrchestratorReplies).
 const (
+	EvtRiskApproved          = "risk.approved.v1"
+	EvtRiskRejected          = "risk.rejected.v1"
+	EvtRiskReviewRequired    = "risk.review_required.v1"
 	EvtSeatReserved          = "inventory.seat_reserved.v1"
 	EvtSeatReservationFailed = "inventory.seat_reservation_failed.v1"
 	EvtSeatReleased          = "inventory.seat_released.v1"
@@ -24,6 +29,18 @@ const (
 	EvtPaymentFailed         = "payment.failed.v1"
 	EvtPaymentRefunded       = "payment.refunded.v1"
 )
+
+// Score is the payload of CmdScore.
+type Score struct {
+	CustomerID  string `json:"customer_id"`
+	CardHash    string `json:"card_hash"`
+	IP          string `json:"ip"`
+	Country     string `json:"country"`
+	AmountCents int64  `json:"amount_cents"`
+}
+
+// CancelReview is the payload of CmdCancelReview.
+type CancelReview struct{}
 
 // ReserveSeat is the payload of CmdReserveSeat.
 type ReserveSeat struct {
